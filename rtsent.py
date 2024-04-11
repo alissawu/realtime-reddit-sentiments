@@ -46,9 +46,10 @@ def get_data(sub, post_limit=50):
 
     return average_sentiment, median_sentiment, headlines
 
+#this is POLITICS SPECIFIC. CHANGE TO VAR LATER.
 @app.route('/')
-def index():
-    return render_template('index.html')
+def politics():
+    return render_template('politics.html')
 
 @app.route('/fetch_sentiment')
 def fetch_sentiment():
