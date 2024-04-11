@@ -1,3 +1,7 @@
 conda create -n rtsent python=3.10
 installations needed: nltk, praw, textblob, pandas
 use pip freeze > requirements.txt to generate reqs
+- but due to conda env it will have a lot of useless stuff
+
+heroku ps:scale web=1
+heroku open

@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <title>Reddit Sentiment Analysis</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-    <script src="/static/js/script.js" defer></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='script.js') }}" defer></script>
+
 </head>
 <body>
     <h1>Reddit Sentiment Analysis</h1>
