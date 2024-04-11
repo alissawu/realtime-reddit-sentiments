@@ -41,13 +41,17 @@ def get_data(sub, post_limit=50):
     # calculate average and median sentiment
     average_sentiment = df['sentiment'].mean()
     median_sentiment = df['sentiment'].median()
-    # last 47 headlines to dict
+    # last 50 headlines to dict
     headlines = df.tail(50).to_dict(orient = 'records') 
 
     return average_sentiment, median_sentiment, headlines
 
-#this is POLITICS SPECIFIC. CHANGE TO VAR LATER.
+# ABOUT PAGE
 @app.route('/')
+def index():
+    return render_template('index.html')
+# POLITICS / SENTIMENT PAGE
+@app.route('/politics')
 def politics():
     return render_template('politics.html')
 
