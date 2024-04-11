@@ -1,2 +1,3 @@
 conda create -n rtsent python=3.10
 installations needed: nltk, praw, textblob, pandas
+use pip freeze > requirements.txt to generate reqs
