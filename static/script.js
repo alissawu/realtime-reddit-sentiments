@@ -27,4 +27,9 @@ function fetchHeadlines() {
 document.addEventListener('DOMContentLoaded', () => {
     fetchSentimentScores();
     fetchHeadlines();
+
+    setInterval(() => {
+        fetchSentimentScores();
+        fetchHeadlines();
+    }, 10000); 
 });
