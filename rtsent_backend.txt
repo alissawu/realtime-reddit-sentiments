@@ -1,0 +1,41 @@
+standalone that worked.
+
+from flask import Flask, render_template
+app = Flask(__name__) #__name__ is built-in Python var, indicates current module
+
+from textblob import TextBlob
+import pandas as pd
+
+# Reddit API Set-up
+import praw
+reddit = praw.Reddit(client_id='SQcUZcwbe_aC_9KKlwRicQ',
+                     client_secret='OZ1rQNFXIOwjSPoFuXy7rpDPseIN1g',
+                     user_agent='alixzr')
+
+def get_sentiments(sub, post_limit=50):
+    # fetch x amt posts from subreddit
+    posts = reddit.subreddit(sub).new(limit=post_limit)
+
+    # simple sentiment analytic 
+    sentiments = []
+    for post in posts:
+        analysis = TextBlob(post.title)
+        sentiment = analysis.sentiment.polarity
+        sentiments.append(sentiment)
+
+    # create dataframe
+    df = pd.DataFrame(sentiments, columns=['Sentiment'])
+
+    # calculate average and median sentiment
+    average_sentiment = df['Sentiment'].mean()
+    median_sentiment = df['Sentiment'].median()
+
+    return average_sentiment, median_sentiment
+
+@app.route('/')
+def sentiment_analysis():
+    average_sentiment, median_sentiment = get_sentiments('politics')
+    return f"Averaged sentiment: {average_sentiment:.2f} <br> Median sentiment: {median_sentiment:.2f}"
+
+if __name__ == '__main__':
+    app.run(debug=True)

@@ -1,0 +1,2 @@
+conda create -n rtsent python=3.10
+installations needed: nltk, praw, textblob, pandas
