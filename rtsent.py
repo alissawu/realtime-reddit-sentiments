@@ -1,4 +1,5 @@
 #export FLASK_APP=rtsent.py
+#.env variables
 from dotenv import load_dotenv
 load_dotenv()  
 
@@ -38,16 +39,24 @@ def get_sentiments(sub, post_limit=50):
     # calculate average and median sentiment
     average_sentiment = df['Sentiment'].mean()
     median_sentiment = df['Sentiment'].median()
+    # last 47 headlines to dict
+    headlines = df.tail(47).to_dict('records') 
 
-    return average_sentiment, median_sentiment
+    return average_sentiment, median_sentiment, headlines
 
+@app.route('/')
+def index():
+    return render_template('index.html')
 @app.route('/fetch_sentiment')
 def fetch_sentiment():
     average_sentiment, median_sentiment = get_sentiments('politics')
     return jsonify(average=average_sentiment, median=median_sentiment)
-@app.route('/')
-def index():
-    return render_template('index.html')
+
+@app.route('/fetch_headlines')
+def fetch_headlines():
+    _, _, headlines = get_sentiments('politics', 50)
+    return jsonify(headlines=headlines[-47:])  # Return the last 47 headlines
+
 
 if __name__ == '__main__':
     # run the app

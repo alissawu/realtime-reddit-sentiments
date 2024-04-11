@@ -1,0 +1,21 @@
+body {
+    font-family: Andale Mono, monospace;
+    background-color: #d9b29C
+}
+.sentiment-item {
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+.positive {
+    border-color: #8d9365;
+}
+.negative {
+    border-color: #8c0303;
+}
+.neutral {
+    border-color: #a86326;
+}
+
+/*https://images.app.goo.gl/9xZ8ukLnk25sac8x6*/
