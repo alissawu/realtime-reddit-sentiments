@@ -17,5 +17,11 @@ body {
 .neutral {
     border-color: #a86326;
 }
+.nav {
+    background-color: #946666;
+}
+.nav a:hover{
+    background-color: #FFFE9C
+}
 
 /*https://images.app.goo.gl/9xZ8ukLnk25sac8x6*/

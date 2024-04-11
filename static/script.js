@@ -1,4 +1,4 @@
-// scores
+// fetch / display sentiments
 function fetchSentimentScores() {
     fetch('/fetch_sentiment')
         .then(response => response.json())
