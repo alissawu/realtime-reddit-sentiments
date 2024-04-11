@@ -1,3 +1,4 @@
 Flask version 3.0.3
 praw version 7.7.1
 textblob version 0.18.0post0
+gunicorn: 21.2.0

@@ -1,1 +1,1 @@
-web: Flask run
+web: gunicorn rtsent:app
