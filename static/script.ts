@@ -3,8 +3,15 @@ function fetchSentimentScores() {
     fetch('/fetch_sentiment')
         .then(response => response.json())
         .then(data => {
-            document.getElementById('average').textContent = `Average Sentiment: ${data.average.toFixed(3)}`;
-            document.getElementById('median').textContent = `Median Sentiment: ${data.median.toFixed(3)}`;
+            const averageSt = document.getElementById('average');
+            const medianSt = document.getElementById('median');
+
+            if (averageSt && medianSt) {
+                averageSt.textContent = `Average Sentiment: ${data.average.toFixed(3)}`;
+                medianSt.textContent = `Median Sentiment: ${data.median.toFixed(3)}`;
+            } else {
+                console.error('Error: Elements not found.');
+            }
         })
         .catch(error => console.error('Error fetching sentiment scores:', error));
 }
@@ -18,7 +25,7 @@ function fetchHeadlines() {
             data.headlines.forEach((headline) => {
                 const element = document.createElement('div');
                 element.textContent = `${headline.title} - Sentiment: ${headline.sentiment.toFixed(3)}`;
-                container.appendChild(element);
+                container?.appendChild(element);
             });
         })
         .catch(error => console.error('Error fetching headlines:', error));
