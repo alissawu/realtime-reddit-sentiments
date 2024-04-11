@@ -24,6 +24,7 @@ function fetchHeadlines() {
         .catch(error => console.error('Error fetching headlines:', error));
 }
 
+// update function
 document.addEventListener('DOMContentLoaded', () => {
     fetchSentimentScores();
     fetchHeadlines();
