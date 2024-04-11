@@ -22,40 +22,43 @@ reddit = praw.Reddit(client_id=client_id,
                      user_agent=user_agent)
 
 
-def get_sentiments(sub, post_limit=50):
+def get_data(sub, post_limit=50):
     # fetch x amt posts from subreddit
     posts = reddit.subreddit(sub).new(limit=post_limit)
 
     # simple sentiment analytic 
-    sentiments = []
+    data = [] #sentiments and headlines
     for post in posts:
         analysis = TextBlob(post.title)
-        sentiment = analysis.sentiment.polarity
-        sentiments.append(sentiment)
+        data.append({
+            'title': post.title,
+            'sentiment': analysis.sentiment.polarity
+        })
 
     # create dataframe 
-    df = pd.DataFrame(sentiments, columns=['Sentiment'])
+    df = pd.DataFrame(data)
 
     # calculate average and median sentiment
-    average_sentiment = df['Sentiment'].mean()
-    median_sentiment = df['Sentiment'].median()
+    average_sentiment = df['sentiment'].mean()
+    median_sentiment = df['sentiment'].median()
     # last 47 headlines to dict
-    headlines = df.tail(47).to_dict('records') 
+    headlines = df.tail(50).to_dict(orient = 'records') 
 
     return average_sentiment, median_sentiment, headlines
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
 @app.route('/fetch_sentiment')
 def fetch_sentiment():
-    average_sentiment, median_sentiment = get_sentiments('politics')
+    average_sentiment, median_sentiment, _ = get_data('politics')
     return jsonify(average=average_sentiment, median=median_sentiment)
 
 @app.route('/fetch_headlines')
 def fetch_headlines():
-    _, _, headlines = get_sentiments('politics', 50)
-    return jsonify(headlines=headlines[-47:])  # Return the last 47 headlines
+    _, _, headlines = get_data('politics', 50)
+    return jsonify(headlines=headlines)
 
 
 if __name__ == '__main__':
