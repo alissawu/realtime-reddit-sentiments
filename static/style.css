@@ -9,18 +9,21 @@ body {
     border-radius: 5px;
 }
 .positive {
-    border-color: #8d9365;
+    color: #8d9365;
+    font-weight:500
 }
 .negative {
-    border-color: #8c0303;
+    color: #8c0303;
+    font-weight:500
 }
 .neutral {
-    border-color: #a86326;
+    color: #a86326;
+    font-weight:500
 }
-.nav {
+.topnav {
     background-color: #946666;
 }
-.nav a:hover{
+.topnav a:hover{
     background-color: #FFFE9C
 }
 
