@@ -37,6 +37,7 @@ def get_data(sub, post_limit=50):
 
     # create dataframe 
     df = pd.DataFrame(data)
+    df = df.sort_values(by='timestamp', ascending=False)
 
     # calculate average and median sentiment
     average_sentiment = df['sentiment'].mean()
