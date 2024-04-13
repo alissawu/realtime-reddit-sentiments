@@ -6,4 +6,6 @@ use pip freeze > requirements.txt to generate reqs
 heroku ps:scale web=1
 heroku open
 
-
+export FLASK_APP=rtsent.py
+export FLASK_ENV=development
+flask run

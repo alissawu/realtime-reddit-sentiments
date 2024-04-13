@@ -21,9 +21,8 @@ reddit = praw.Reddit(client_id=client_id,
                      user_agent=user_agent)
 
 def get_data(sub, post_limit=50):
-    """Fetch a specified amount of posts from a subreddit and perform sentiment analysis."""
     posts = reddit.subreddit(sub).new(limit=post_limit)
-    data = []  # Sentiments and headlines
+    data = []  # sentiments and headlines
     for post in posts:
         analysis = TextBlob(post.title)
         data.append({
@@ -38,23 +37,19 @@ def get_data(sub, post_limit=50):
 
 @app.route('/')
 def index():
-    """Serve the index page that can link to different subreddit analyses."""
     return render_template('index.html')
 
 @app.route('/<subreddit>')
 def subreddit_page(subreddit):
-    """Render a page for each subreddit dynamically."""
     return render_template('subreddit.html', subreddit=subreddit)
 
 @app.route('/fetch_sentiment/<subreddit>')
 def fetch_sentiment(subreddit):
-    """Fetch and return the average and median sentiment for a specific subreddit."""
     average_sentiment, median_sentiment, _ = get_data(subreddit)
     return jsonify(average=average_sentiment, median=median_sentiment)
 
 @app.route('/fetch_headlines/<subreddit>')
 def fetch_headlines(subreddit):
-    """Fetch and return the latest 50 headlines from a specific subreddit."""
     _, _, headlines = get_data(subreddit, 50)
     return jsonify(headlines=headlines)
 

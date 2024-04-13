@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ subreddit | capitalize }} Sentiment Analysis</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script defer src="{{ url_for('static', filename='script.js') }}"></script>
+</head>
+<body>
+    <div class="topnav">
+        <a href="/" class="{{ 'active' if active_link == 'index' else '' }}">About</a>
+        <a href="/politics" class="{{ 'active' if active_link == 'politics' else '' }}">r/politics</a>
+        <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>
+        
+    </div>
+
+    <h1>Sentiment Analysis for r/{{ subreddit | capitalize }}</h1>
+    <p id="average">Loading average sentiment...</p>
+    <p id="median">Loading median sentiment...</p>
+    <div id="headlinesContainer"></div>
+
+    <script>
+        const subreddit = "{{ subreddit }}";
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchSentimentScores(subreddit);
+            fetchHeadlines(subreddit);
+
+            setInterval(() => {
+                fetchSentimentScores(subreddit);
+                fetchHeadlines(subreddit);
+            }, 10000); // 10 sec
+        });
+    </script>
+</body>
+</html>

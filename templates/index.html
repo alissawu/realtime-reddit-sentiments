@@ -4,13 +4,14 @@
         <meta charset="UTF-8">
         <title>About</title>
         <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-        <script src="{{ url_for('static', filename='script.ts') }}" defer></script>
+        <script src="{{ url_for('static', filename='script.js') }}" defer></script>
     </head>
     <body>
         <div class="topnav">
-            <a class="active" href="/">About</a>
-            <a href="/politics">r/politics</a>
-            <a href="/subreddit">r/subreddit</a>
+            <a href="/" class="{{ 'active' if active_link == 'index' else '' }}">About</a>
+            <a href="/politics" class="{{ 'active' if active_link == 'politics' else '' }}">r/politics</a>
+            <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>
+            
         </div>
 
         <div class="container">
