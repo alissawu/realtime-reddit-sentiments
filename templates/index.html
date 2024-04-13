@@ -10,14 +10,13 @@
         <div class="topnav">
             <a href="/" class="{{ 'active' if active_link == 'index' else '' }}">About</a>
             <a href="/politics" class="{{ 'active' if active_link == 'politics' else '' }}">r/politics</a>
-            <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>
-            
+            <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>            
         </div>
 
         <div class="container">
             <h1>Project Overview</h1>
             <p>This web application provides real-time sentiment analysis of the 50 most recent posts from r/politics, and will update based on new posts. </p>
-            <p>Backend: Flask, Textblob for sentiment analysis; Front-end: HTML/CSS/TS</p>
+            <p>Backend: Flask, Textblob for sentiment analysis; Front-end: HTML/CSS/JS (formerly TS, which had native support complications)</p>
             
             <h2>Current Features</h2>
             <ul>
