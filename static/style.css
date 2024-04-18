@@ -21,6 +21,8 @@ body {
     font-weight:500
 }
 .topnav {
+    margin-left: 20px;
+    height: 40px;
     background-color: #946666;
 }
 .topnav a:hover{
