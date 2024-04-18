@@ -21,9 +21,15 @@ body {
     font-weight:500
 }
 .topnav {
-    margin-left: 20px;
     height: 40px;
+    line-height: 40px; /* vertical center? */
     background-color: #946666;
+}
+.topnav a {
+    text-decoration: none; /* no underline */
+    display: inline-block;
+    vertical-align: middle;
+    padding: 0 10px; /* horizontal pad */
 }
 .topnav a:hover{
     background-color: #FFFE9C
