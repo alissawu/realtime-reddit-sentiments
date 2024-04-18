@@ -29,7 +29,7 @@ body {
     text-decoration: none; /* no underline */
     display: inline-block;
     vertical-align: middle;
-    padding: 0 10px; /* horizontal pad */
+    padding: 0 20px; /* horizontal pad */
 }
 .topnav a:hover{
     background-color: #FFFE9C
