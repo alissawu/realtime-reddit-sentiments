@@ -34,26 +34,21 @@
             <p>However, it lacks a sequential context (word order), so like "not good" and "good not" would mean the same thing</p>
             <p>Also doesn't model how a word can change on its surrounding context"</p>
             
-            <h2>Model 3: PyTorch</h2>
-            
-            
+            <h2>Model 3: PyTorch LSTM</h2>
+            <p>Instaed of pooling, this model uses an LSTM, which is a type of RNN designed to capturing sequential information across the word sequence, which is good for sentiment analysis, where context is important</p>
+            <p>More computationally intensive but captures more complex dependencies. to be expanded later.</p>
             <h2>Model 3 Optimization</h2>
             <img src="{{ url_for('static', filename='0accuracyvsepoch.png') }}" alt="Accuracy vs Epoch" width="500" height="400">
 
             <p>Up to E3, train and validation accuracy increases</p>
             <p>After that, train accuracy improves, but validation decreases, which indicates overfitting. So 3 epochs is the best</p>
             <p>The confusion matrix (haven't done this yet, more analysis and improvement later)</p>
-            
-            <ul>
-                <li>Displays mean and median sentiment statistics and formatted data of the 50 posts.</li>
-            </ul>
 
             <h2>Creator(s)</h2>
             <ul>
                 <li><a href="https://github.com/alissawu">Alissa Wu</a>, Duke University Computer Science and Mathematics</li>
                 <li><a href="https://github.com/EvanPFWang">Evan Wang</a>, New York University Mathematics and Computer Science</li>
             </ul>
-            <p>(Evan pls add to this when you're free)</p>
         </div>
     </body>
 </html>
