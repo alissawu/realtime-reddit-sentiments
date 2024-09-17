@@ -9,8 +9,9 @@
     <body>
         <div class="topnav">
             <a href="/" class="{{ 'active' if active_link == 'index' else '' }}">About</a>
+            <a href="/modelnotes" class="{{ 'active' if active_link == 'modelnotes' else '' }}">Model Notes</a>
             <a href="/politics" class="{{ 'active' if active_link == 'politics' else '' }}">r/politics</a>
-            <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>            
+            <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>
         </div>
 
         <div class="container">
@@ -21,6 +22,7 @@
             <h2>Structure</h2>
             <ul>
                 <li>Displays mean and median sentiment statistics and formatted data of the 50 posts.</li>
+                <li>Sentiment ranges from -1 (negative) to 1 (positive)</li>
             </ul>
             <h2>Coolest Features</h2>
             <ul>
@@ -31,13 +33,13 @@
             </ul>
             <h2>To do</h2>
             <ul>
-                <li>Developing a better sentiment analysis model; current one is a pretrained Naive Bayes (!!!waiting for epfw to be free so we can work on that RNN...may develop something myself in the meantime if I'm free)</li>
-                <li>Adding user-input for subreddits instead of manually adding on my end - ...need to figure out variable input error catch logistics and stuff + busy rn so later</li>
+                <li>Optimizing / analyzing the sentiment analysis model</li>
+                <li>Adding user-input for subreddits instead of manually adding on my end </li>
             </ul>
             <h2>Creator(s)</h2>
             <ul>
-                <li>Alissa Wu, Duke University Computer Science and Mathematics</li>
-                <li>See my <a href="https://github.com/alissawu">github</a> for more projects!</li>
+                <li><a href="https://github.com/alissawu">Alissa Wu</a>, Duke University Computer Science and Mathematics</li>
+                <li><a href="https://github.com/EvanPFWang">Evan Wang</a>, New York University Mathematics and Computer Science</li>
             </ul>
         </div>
     </body>

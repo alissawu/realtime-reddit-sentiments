@@ -39,6 +39,10 @@ def get_data(sub, post_limit=50):
 def index():
     return render_template('index.html')
 
+@app.route('/modelnotes')
+def modelnotes_page():
+    return render_template('modelnotes.html')
+
 @app.route('/<subreddit>')
 def subreddit_page(subreddit):
     return render_template('subreddit.html', subreddit=subreddit)
