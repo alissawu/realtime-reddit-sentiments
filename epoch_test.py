@@ -2,8 +2,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+import matplotlib.pyplot as plt
+import seaborn as sns
 from keras.datasets import imdb
 from keras.preprocessing.sequence import pad_sequences
+import numpy as np
 
 # Load IMDB dataset
 vocabulary_size = 5000
@@ -30,8 +34,7 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-
-# Define the model
+# Should be the same as the model in rnn_torch.py
 class SentimentAnalysisModel(nn.Module):
     def __init__(self, vocab_size, embed_size, lstm_size, max_words):
         super(SentimentAnalysisModel, self).__init__()
@@ -47,7 +50,6 @@ class SentimentAnalysisModel(nn.Module):
         x = self.sigmoid(x)
         return x
 
-
 embedding_size = 32
 lstm_size = 100
 model = SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
@@ -56,10 +58,17 @@ model = SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_w
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Train the model
-num_epochs = 3
+# Store training and validation accuracy for plotting
+train_accuracies = []
+val_accuracies = []
+
+# Train the model and capture accuracy at each epoch
+num_epochs = 10
 model.train()
 for epoch in range(num_epochs):
+    correct_train = 0
+    total_train = 0
+    
     for inputs, labels in train_loader:
         outputs = model(inputs).squeeze()
         loss = criterion(outputs, labels)
@@ -67,32 +76,37 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}')
 
-# Validate the model
-model.eval()
-val_loss = 0
-val_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in val_loader:
-        outputs = model(inputs).squeeze()
-        loss = criterion(outputs, labels)
-        val_loss += loss.item()
-        val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-val_loss /= len(val_loader)
-val_accuracy /= len(val_loader)
-print('Validation Loss:', val_loss)
-print('Validation Accuracy:', val_accuracy)
+        predicted_train = (outputs > 0.5).float()
+        correct_train += (predicted_train == labels).sum().item()
+        total_train += labels.size(0)
 
-# Evaluate the model on the test set
-test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
-test_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in test_loader:
-        outputs = model(inputs).squeeze()
-        test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-test_accuracy /= len(test_loader)
-print('Test Accuracy:', test_accuracy)
+    train_accuracy = correct_train / total_train
+    train_accuracies.append(train_accuracy)
 
-# Save the model
-torch.save(model.state_dict(), 'sentiment_model.pth')
+    # Validate the model after each epoch
+    model.eval()
+    correct_val = 0
+    total_val = 0
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            outputs = model(inputs).squeeze()
+            predicted_val = (outputs > 0.5).float()
+            correct_val += (predicted_val == labels).sum().item()
+            total_val += labels.size(0)
+    val_accuracy = correct_val / total_val
+    val_accuracies.append(val_accuracy)
+
+    print(f'Epoch {epoch + 1}/{num_epochs}, Train Accuracy: {train_accuracy:.4f}, Validation Accuracy: {val_accuracy:.4f}')
+
+# Plot accuracy vs. epochs
+plt.figure(figsize=(8, 6))
+plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
+plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('Accuracy vs. Epochs')
+plt.legend()
+plt.show()
+
+
