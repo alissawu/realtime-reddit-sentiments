@@ -38,11 +38,28 @@
             <p>Instaed of pooling, this model uses an LSTM, which is a type of RNN designed to capturing sequential information across the word sequence, which is good for sentiment analysis, where context is important</p>
             <p>More computationally intensive but captures more complex dependencies. to be expanded later.</p>
             <h2>Model 3 Optimization</h2>
-            <img src="{{ url_for('static', filename='0accuracyvsepoch.png') }}" alt="Accuracy vs Epoch" width="500" height="400">
+            <p>When I initially tested the model, I noticed that up to E3, train accuracy increased and validation loss decreased</p>
+            <p>After that, train accuracy improves, but validation loss increased, which indicates overfitting. So 3 epochs is the best</p>
+            <p>However, when I looked at the confusion matrix, the false positives was extremely high, indicating poor fitting in general. I looked at the model and noticed vocabulary was 4000, which is pretty low for vocabulary. Increasing it to 50000 vastly increased accuracy and pushed the overfitting issue back.</p>
+            <p>I tested vocab = 40000 and 30000, will later automate this but 30000 was better, with accuracy over 89% at decreasing validation loss on epoch 6</p>
+            <img src="{{ url_for('static', filename='epochtest1.png') }}" alt="Validation Loss vs Epoch" width="500" height="400">
+            <p>It's hard to see, but based on the numbers:</p>
+            <p>
+                Epoch 1/10, Train Accuracy: 0.6205, Validation Loss: 0.5736 <br>
+                Epoch 2/10, Train Accuracy: 0.7090, Validation Loss: 0.5674 <br>
+                Epoch 3/10, Train Accuracy: 0.7794, Validation Loss: 0.4797 <br>
+                Epoch 4/10, Train Accuracy: 0.8460, Validation Loss: 0.4006 <br>
+                Epoch 5/10, Train Accuracy: 0.8739, Validation Loss: 0.3753 <br>
+                Epoch 6/10, Train Accuracy: 0.8944, Validation Loss: 0.3733 <br>
+                Epoch 7/10, Train Accuracy: 0.9095, Validation Loss: 0.3747 <br>
+                Epoch 8/10, Train Accuracy: 0.9193, Validation Loss: 0.3974 <br>
+                Epoch 9/10, Train Accuracy: 0.9336, Validation Loss: 0.3659 <br>
+                Epoch 10/10, Train Accuracy: 0.9483, Validation Loss: 0.3954
+            </p>
+            <p>I plan to further improve the model thro optimizer parameters, test/train split, etc - later. I'll probably also run it a few times and take an average of epoch values instead of only one time, but LSTMs are slow so - later.</p>
+            
 
-            <p>Up to E3, train and validation accuracy increases</p>
-            <p>After that, train accuracy improves, but validation decreases, which indicates overfitting. So 3 epochs is the best</p>
-            <p>The confusion matrix (haven't done this yet, more analysis and improvement later)</p>
+
 
             <h2>Creator(s)</h2>
             <ul>

@@ -10,7 +10,7 @@ from keras.preprocessing.sequence import pad_sequences
 import numpy as np
 
 # Load IMDB dataset
-vocabulary_size = 5000
+vocabulary_size = 30000
 (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
@@ -34,7 +34,7 @@ train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
-# Should be the same as the model in rnn_torch.py
+# Define the model
 class SentimentAnalysisModel(nn.Module):
     def __init__(self, vocab_size, embed_size, lstm_size, max_words):
         super(SentimentAnalysisModel, self).__init__()
@@ -58,11 +58,11 @@ model = SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_w
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Store training and validation accuracy for plotting
+# Store training accuracy and validation loss for plotting
 train_accuracies = []
-val_accuracies = []
+val_losses = []
 
-# Train the model and capture accuracy at each epoch
+# Train the model and capture accuracy and loss at each epoch
 num_epochs = 10
 model.train()
 for epoch in range(num_epochs):
@@ -86,27 +86,24 @@ for epoch in range(num_epochs):
 
     # Validate the model after each epoch
     model.eval()
-    correct_val = 0
-    total_val = 0
+    val_loss = 0
     with torch.no_grad():
         for inputs, labels in val_loader:
             outputs = model(inputs).squeeze()
-            predicted_val = (outputs > 0.5).float()
-            correct_val += (predicted_val == labels).sum().item()
-            total_val += labels.size(0)
-    val_accuracy = correct_val / total_val
-    val_accuracies.append(val_accuracy)
+            loss = criterion(outputs, labels)
+            val_loss += loss.item()
+    
+    val_loss /= len(val_loader)
+    val_losses.append(val_loss)
 
-    print(f'Epoch {epoch + 1}/{num_epochs}, Train Accuracy: {train_accuracy:.4f}, Validation Accuracy: {val_accuracy:.4f}')
+    print(f'Epoch {epoch + 1}/{num_epochs}, Train Accuracy: {train_accuracy:.4f}, Validation Loss: {val_loss:.4f}')
 
-# Plot accuracy vs. epochs
+# Plot train accuracy vs. epochs and validation loss vs. epochs
 plt.figure(figsize=(8, 6))
 plt.plot(range(1, num_epochs + 1), train_accuracies, label='Train Accuracy')
-plt.plot(range(1, num_epochs + 1), val_accuracies, label='Validation Accuracy')
+plt.plot(range(1, num_epochs + 1), val_losses, label='Validation Loss')
 plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.title('Accuracy vs. Epochs')
+plt.ylabel('Metric')
+plt.title('Train Accuracy and Validation Loss vs. Epochs')
 plt.legend()
 plt.show()
-
-
