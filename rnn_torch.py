@@ -6,7 +6,7 @@ from keras.datasets import imdb
 from keras.preprocessing.sequence import pad_sequences
 
 # Load IMDB dataset
-vocabulary_size = 5000
+vocabulary_size = 30000
 (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
@@ -57,7 +57,7 @@ criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train the model
-num_epochs = 3
+num_epochs = 6
 model.train()
 for epoch in range(num_epochs):
     for inputs, labels in train_loader:
