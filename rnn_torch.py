@@ -2,12 +2,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, random_split
-from keras.datasets import imdb
-from keras.preprocessing.sequence import pad_sequences
+from torchtext.data import imdb
+
+#from keras.datasets import imdb
+#ffrom keras.preprocessing.sequence import pad_sequences
 
 # Load IMDB dataset
 vocabulary_size = 30000
-(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
+ (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
 # Pad sequences to ensure uniform length
