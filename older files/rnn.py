@@ -8,6 +8,7 @@ from keras.models import Sequential
 from keras.layers import Embedding, GlobalAveragePooling1D, Dense, Dropout
 from keras.datasets import imdb
 import numpy as np
+import matplotlib.pyplot as plt
 
 # const for data preprocessing
 max_length = 256  #2^8 max length of the sequences
@@ -39,6 +40,15 @@ val_data = preprocess_data(val_data)
 
 # Model architecture
 # embedding_dim from 32 to 256
+def build_model(vocab_size, embedding_dim=32, hidden_units=16):
+    model = Sequential([
+        Embedding(vocab_size, embedding_dim, input_length=max_length),
+        GlobalAveragePooling1D(),
+        Dropout(0.2),
+        Dense(hidden_units, activation='relu'),
+        Dense(1, activation='sigmoid')
+    ])
+    return model
 def build_model_initial(vocab_size, embedding_dim=256, hidden_units=16):
     model = Sequential([
         Embedding(vocab_size, embedding_dim, input_length=max_length),
@@ -57,19 +67,27 @@ def build_model_secondary(vocab_size, embedding_dim=256, hidden_units=16):
         Dense(1, activation='sigmoid')
     ])
     return model
-
-# Build and compile 
-model = build_model_initial(vocab_size)
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-model.summary()
-
-# Train and evaluate our model based on imdb review data ONLY - no reddit yet
 print(f"{len(train_data)} train samples + {len(train_labels)} train labels")
 print(f"{len(val_data)} validation samples + {len(val_labels)} validation labels")
 print(f"{len(test_data)} test samples + {len(test_labels)} test labels")
-history = model.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), verbose=2)
-test_loss, test_acc = model.evaluate(test_data, test_labels, verbose=2)
-print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
+# Build and compile
+embedding_dimensions    =   [2**i for i in range(2,9)]
+emb_history =   {}
+for i in embedding_dimensions:
+    print(f"\nModel with embedding dimension {i}: ")
+
+    model1 = build_model(vocab_size,i)
+    model1.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    model1.summary()
+
+# Train and evaluate our model based on imdb review data ONLY - no reddit yet
+
+    history = model1.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), verbose=2)
+    emb_history[i] = history.history
+    test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
+
+    print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
+
 def boostrap_binary_cross_entropy(data, labels, n_iter):
     bootstrap_accuracy =   []
     bootstrap_loss = []
@@ -87,7 +105,24 @@ def boostrap_binary_cross_entropy(data, labels, n_iter):
     mean_acc = np.mean(bootstrap_acc)
     mean_loss = np.mean(bootstrap_loss)
     return mean_acc, mean_loss
-bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
+#bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
 print(f"Bootstrap Test Accuracy: {test_acc}, Bootstrap Test Loss: {test_loss}")
+plt.figure(figsize=(11,8))
 
+for dimensions,history  in  emb_history.items():
+    #plt.plot(history.history['acc'])
+    #plt.plot(history.history['loss'])
+    # Plot training accuracy
+    plt.plot(history['accuracy'], label=f'Train Acc (Embedding Dim {embedding_dim})', linestyle='-')
+    # Plot validation accuracy
+    plt.plot(history['val_accuracy'], label=f'Val Acc (Embedding Dim {embedding_dim})', linestyle='--')
+    plt.plot(history['loss'], label=f'Train Loss Acc (Embedding Dim {embedding_dim})', linestyle=':')
+    plt.plot(history['val_loss'], label=f'Val Loss (Embedding Dim {embedding_dim})', linestyle='-.')
+
+plt.title('Training and Validation Accuracy and Loss over Epochs for Different Embedding Dimensions')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend(loc='lower right')  # Automatically create a legend with appropriate labels
+plt.grid(True)
+plt.show()
 model.save('my_model.keras')
