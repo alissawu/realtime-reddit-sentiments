@@ -40,17 +40,24 @@ val_data = preprocess_data(val_data)
 
 # Model architecture
 # embedding_dim from 32 to 256
-def build_model(vocab_size, embedding_dim=32, hidden_units=16):
+# i
+def build_model(vocab_size, embedding_dim=64, hidden_units=16):
     model = Sequential([
+        #inputs 256 x 1
         Embedding(vocab_size, embedding_dim, input_length=max_length),
+        # outputs 256 x 1 x embedding_dim
         GlobalAveragePooling1D(),
-        Dropout(0.2),
+        #outputs 256 x embedding_data
+        Dropout(0.25),
+        # outputs 256 x embedding_data
         Dense(hidden_units, activation='relu'),
+
         Dense(1, activation='sigmoid')
     ])
     return model
 def build_model_initial(vocab_size, embedding_dim=256, hidden_units=16):
     model = Sequential([
+
         Embedding(vocab_size, embedding_dim, input_length=max_length),
         GlobalAveragePooling1D(),
         Dropout(0.2),
@@ -71,7 +78,9 @@ print(f"{len(train_data)} train samples + {len(train_labels)} train labels")
 print(f"{len(val_data)} validation samples + {len(val_labels)} validation labels")
 print(f"{len(test_data)} test samples + {len(test_labels)} test labels")
 # Build and compile
-embedding_dimensions    =   [2**i for i in range(2,9)]
+embedding_dimensions    =   [2**i for i in range(4,9)]
+colors = ['red', 'orange', 'green', 'blue', 'purple']
+#colors = ['red', 'green', 'blue', 'orange', 'purple']
 emb_history =   {}
 for i in embedding_dimensions:
     print(f"\nModel with embedding dimension {i}: ")
@@ -106,23 +115,23 @@ def boostrap_binary_cross_entropy(data, labels, n_iter):
     mean_loss = np.mean(bootstrap_loss)
     return mean_acc, mean_loss
 #bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
-print(f"Bootstrap Test Accuracy: {test_acc}, Bootstrap Test Loss: {test_loss}")
+#print(f"Bootstrap Test Accuracy: {test_acc}, Bootstrap Test Loss: {test_loss}")
 plt.figure(figsize=(11,8))
-
+counter =   0
 for dimensions,history  in  emb_history.items():
     #plt.plot(history.history['acc'])
     #plt.plot(history.history['loss'])
     # Plot training accuracy
-    plt.plot(history['accuracy'], label=f'Train Acc (Embedding Dim {embedding_dim})', linestyle='-')
+#    plt.plot(history['accuracy'], label=f'Train Acc (Embedding Dim {dimensions})', linestyle='-')
     # Plot validation accuracy
-    plt.plot(history['val_accuracy'], label=f'Val Acc (Embedding Dim {embedding_dim})', linestyle='--')
-    plt.plot(history['loss'], label=f'Train Loss Acc (Embedding Dim {embedding_dim})', linestyle=':')
-    plt.plot(history['val_loss'], label=f'Val Loss (Embedding Dim {embedding_dim})', linestyle='-.')
-
+#    plt.plot(history['val_accuracy'], label=f'Val Acc (Embedding Dim {dimensions})', linestyle='--')
+    plt.plot(history['loss'], label=f'Train Loss Acc (Embedding Dim {dimensions})', linestyle='-',color=colors[counter])
+    plt.plot(history['val_loss'], label=f'Val Loss (Embedding Dim {dimensions})', linestyle='-.',color=colors[counter])
+    counter +=  1
 plt.title('Training and Validation Accuracy and Loss over Epochs for Different Embedding Dimensions')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
-plt.legend(loc='lower right')  # Automatically create a legend with appropriate labels
+plt.legend(loc='upper left')  # Automatically create a legend with appropriate labels
 plt.grid(True)
 plt.show()
 model.save('my_model.keras')
