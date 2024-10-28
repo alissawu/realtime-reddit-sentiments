@@ -1,23 +1,36 @@
 # what i was doing real quick before i realized you commited a torch thing LMNFAO sigh
 from ensurepip import bootstrap
-
+import requests
 import tensorflow as tf
 # noinspection PyUnresolvedReferences
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
-from keras.layers import Embedding, GlobalAveragePooling1D, Dense, Dropout
+from keras.layers import Embedding, LSTM, GlobalAveragePooling1D, Dense, Dropout
 from keras.datasets import imdb
 import numpy as np
 import matplotlib.pyplot as plt
-
+from keras.src.layers import TextVectorization
 # const for data preprocessing
 max_length = 256  #2^8 max length of the sequences
 padding_type = 'post'  # padding type for sequences shorter than the maximum length
-vocab_size = 32768  # size of the vocabulary used in the Embedding layer
+vocab_size = 65536  # size of the vocabulary used in the Embedding layer
 #5000,10000, 20000
 # Load the IMDB dataset
 
 (train_data, train_labels), (test_data, test_labels) = imdb.load_data(num_words=vocab_size)
+
+# Get word index mapping integer IDs to words
+word_index = imdb.get_word_index()
+
+# word index offset, so shift it for compatibility with our dataset
+word_index = {k: (v + 3) for k, v in word_index.items()}  # Adjust for special tokens
+word_index["<PAD>"] = 0
+word_index["<START>"] = 1
+word_index["<UNK>"] = 2
+word_index["<UNUSED>"] = 3
+
+# reverse dictionary to map integer IDs to words
+reverse_word_index = {value: key for (key, value) in word_index.items()}
 
 # preprocess data
 def preprocess_data(data):
@@ -38,16 +51,46 @@ train_data = preprocess_data(train_data)
 test_data = preprocess_data(test_data)
 val_data = preprocess_data(val_data)
 
+
+# get full vocab
+url =   "http://nlp.stanford.edu/data/glove.6B.100d.txt"
+top_words = {word: index for word, index in word_index.items() if index < vocab_size}
+reverse_word_index = {index: word for word, index in top_words.items()}
+embedding_index = {}
+#stream glove embeddings for  top IMDb vocabulary, store only
+response = requests.get(url, stream=True)
+for line in response.iter_lines():
+    if line:
+        decoded_line = line.decode('utf-8')
+        values = decoded_line.split()
+        word = values[0]
+        if word in top_words:  # Only store embeddings if the word is in our IMDb vocabulary
+            coefficients = list(map(float, values[1:]))
+            embedding_index[word] = coefficients
+
+
+#embedding_dimensions    =   [2**i for i in range(4,9)]
+embedding_dimension    =   100
+
+embedding_matrix = np.zeros([vocab_size, embedding_dimension])
+
+for word,i in word_index.items():
+    if  i   < vocab_size:
+        embedding_vector = embedding_index.get(word)
+        if embedding_vector is not None:
+            embedding_matrix[i] = embedding_vector
 # Model architecture
-# embedding_dim from 32 to 256
+# embedding_dim from 16 to 256
 # i
-def build_model(vocab_size, embedding_dim=64, hidden_units=16):
+def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix=None):
     model = Sequential([
         #inputs 256 x 1
-        Embedding(vocab_size, embedding_dim, input_length=max_length),
+        #inputs
+        Embedding(vocab_size, embedding_dim, input_length=max_length, mask_zero=True, weights=[embedding_matrix]),
         # outputs 256 x 1 x embedding_dim
-        GlobalAveragePooling1D(),
-        #outputs 256 x embedding_data
+        LSTM(256, dropout=0.25, recurrent_dropout=0.25),
+        #GlobalAveragePooling1D(),
+        #outputs 256  x embedding_data
         Dropout(0.25),
         # outputs 256 x embedding_data
         Dense(hidden_units, activation='relu'),
@@ -55,12 +98,11 @@ def build_model(vocab_size, embedding_dim=64, hidden_units=16):
         Dense(1, activation='sigmoid')
     ])
     return model
-def build_model_initial(vocab_size, embedding_dim=256, hidden_units=16):
+def build_model_initial(vocab_size, embedding_dim=64, hidden_units=16):
     model = Sequential([
-
         Embedding(vocab_size, embedding_dim, input_length=max_length),
         GlobalAveragePooling1D(),
-        Dropout(0.2),
+        Dropout(0.25),
         Dense(hidden_units, activation='relu'),
         Dense(1, activation='sigmoid')
     ])
@@ -78,11 +120,12 @@ print(f"{len(train_data)} train samples + {len(train_labels)} train labels")
 print(f"{len(val_data)} validation samples + {len(val_labels)} validation labels")
 print(f"{len(test_data)} test samples + {len(test_labels)} test labels")
 # Build and compile
-embedding_dimensions    =   [2**i for i in range(4,9)]
+#ideal is 16 emb dim + epoch = 4
+
 colors = ['red', 'orange', 'green', 'blue', 'purple']
 #colors = ['red', 'green', 'blue', 'orange', 'purple']
 emb_history =   {}
-for i in embedding_dimensions:
+"""for i in embedding_dimensions:
     print(f"\nModel with embedding dimension {i}: ")
 
     model1 = build_model(vocab_size,i)
@@ -91,11 +134,20 @@ for i in embedding_dimensions:
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
 
-    history = model1.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), verbose=2)
+    history = model1.fit(train_data, train_labels, epochs=8, batch_size=16, validation_data=(val_data, val_labels), verbose=2)
     emb_history[i] = history.history
-    test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
+    test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)"""
 
-    print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
+model1 = build_model(vocab_size,embedding_dimension, 16, embedding_matrix)
+model1.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model1.summary()
+
+# Train and evaluate our model based on imdb review data ONLY - no reddit yet
+
+history = model1.fit(train_data, train_labels, epochs=8, batch_size=16, validation_data=(val_data, val_labels), verbose=2)
+emb_history[i] = history.history
+test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
+print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
 
 def boostrap_binary_cross_entropy(data, labels, n_iter):
     bootstrap_accuracy =   []
@@ -116,7 +168,7 @@ def boostrap_binary_cross_entropy(data, labels, n_iter):
     return mean_acc, mean_loss
 #bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
 #print(f"Bootstrap Test Accuracy: {test_acc}, Bootstrap Test Loss: {test_loss}")
-plt.figure(figsize=(11,8))
+plt.figure(figsize=(12,8))
 counter =   0
 for dimensions,history  in  emb_history.items():
     #plt.plot(history.history['acc'])
