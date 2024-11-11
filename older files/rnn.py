@@ -88,7 +88,8 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         #inputs
         Embedding(vocab_size, embedding_dim, input_length=max_length, mask_zero=True, weights=[embedding_matrix]),
         # outputs 256 x 1 x embedding_dim
-        LSTM(256, dropout=0.25, recurrent_dropout=0.25),
+        LSTM(256, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25),
+        GlobalAveragePooling1D(),
         #GlobalAveragePooling1D(),
         #outputs 256  x embedding_data
         Dropout(0.25),
