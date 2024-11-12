@@ -99,8 +99,9 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         Dropout(0.25),
         # outputs 256 x embedding_data
         Dense(hidden_units, activation='relu'),
+        Dense(3, activation='softmax')
 
-        Dense(1, activation='sigmoid')
+        #Dense(1, activation='sigmoid')
     ])
     return model
 def build_model_initial(vocab_size, embedding_dim=64, hidden_units=16):
@@ -146,7 +147,8 @@ emb_history =   {}
     test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)"""
 
 model1 = build_model(vocab_size,embedding_dimension, 16, embedding_matrix)
-model1.compile(optimizer=Adam(learning_rate=0.004), loss='binary_crossentropy', metrics=['accuracy'])
+# model1.compile(optimizer=Adam(learning_rate=0.004), loss='binary_crossentropy', metrics=['accuracy'])
+model1.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 model1.summary()
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
