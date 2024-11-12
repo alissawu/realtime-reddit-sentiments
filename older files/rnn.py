@@ -5,8 +5,12 @@ import tensorflow as tf
 # noinspection PyUnresolvedReferences
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
-from keras.layers import Embedding, LSTM, GlobalAveragePooling1D, Dense, Dropout
+from keras.layers import Embedding, LSTM, Bidirectional, GlobalAveragePooling1D, Dense, Dropout
 from keras.datasets import imdb
+from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.optimizers import Adam
+
+
 import numpy as np
 import matplotlib.pyplot as plt
 from keras.src.layers import TextVectorization
@@ -88,7 +92,7 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         #inputs
         Embedding(vocab_size, embedding_dim, input_length=max_length, mask_zero=True, weights=[embedding_matrix]),
         # outputs 256 x 1 x embedding_dim
-        LSTM(256, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25),
+        Bidirectional(LSTM(256, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25)),
         GlobalAveragePooling1D(),
         #GlobalAveragePooling1D(),
         #outputs 256  x embedding_data
@@ -135,17 +139,19 @@ emb_history =   {}
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
 
-    history = model1.fit(train_data, train_labels, epochs=8, batch_size=16, validation_data=(val_data, val_labels), verbose=2)
+    
+    
+     = model1.fit(train_data, train_labels, epochs=8, batch_size=16, validation_data=(val_data, val_labels), verbose=2)
     emb_history[i] = history.history
     test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)"""
 
 model1 = build_model(vocab_size,embedding_dimension, 16, embedding_matrix)
-model1.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model1.compile(optimizer=Adam(learning_rate=0.004), loss='binary_crossentropy', metrics=['accuracy'])
 model1.summary()
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
-
-history = model1.fit(train_data, train_labels, epochs=8, batch_size=16, validation_data=(val_data, val_labels), verbose=2)
+early_stopper   =   EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+history = model1.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), callbacks=[early_stopping])
 emb_history[i] = history.history
 test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
 print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
@@ -169,7 +175,7 @@ def boostrap_binary_cross_entropy(data, labels, n_iter):
     return mean_acc, mean_loss
 #bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
 #print(f"Bootstrap Test Accuracy: {test_acc}, Bootstrap Test Loss: {test_loss}")
-plt.figure(figsize=(12,8))
+plt.figure(figsize=(14,10))
 counter =   0
 for dimensions,history  in  emb_history.items():
     #plt.plot(history.history['acc'])
