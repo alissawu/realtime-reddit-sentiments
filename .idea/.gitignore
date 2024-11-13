@@ -6,3 +6,6 @@
 # Datasource local storage ignored files
 /dataSources/
 /dataSources.local.xml
+# Ignore IDE-specific directories and files for JetBrains IDEs
+.idea/
+*.iml
