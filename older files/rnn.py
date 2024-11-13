@@ -7,9 +7,9 @@ from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
 from keras.layers import Embedding, LSTM, Bidirectional, GlobalAveragePooling1D, Dense, Dropout
 from keras.datasets import imdb
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import ReduceLROnPlateau, EarlyStopping
 from tensorflow.keras.optimizers import Adam
-
+from tensorflow.keras.activations import swish
 from tensorflow.keras.regularizers import l2
 
 
@@ -95,6 +95,8 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         Embedding(vocab_size, embedding_dim, input_length=max_length, mask_zero=True, weights=[embedding_matrix]),
         # outputs 256 x 1 x embedding_dim
         Bidirectional(LSTM(256, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25)),
+        Bidirectional(LSTM(128, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25)),
+        Dense(64, activation    =   swish),
         GlobalAveragePooling1D(),
         #GlobalAveragePooling1D(),
         #outputs 256  x embedding_data
@@ -154,8 +156,9 @@ model1.compile(optimizer=Adam(learning_rate=0.004), loss='sparse_categorical_cro
 model1.summary()
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
+reduce_lr   =   ReduceLROnPlateau(monitor='val_loss', factor=0.5,patience   =   2,  min_lr  =   0.00025)
 early_stopper   =   EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-history = model1.fit(train_data, train_labels, epochs=11, batch_size=16, validation_data=(val_data, val_labels), callbacks=[early_stopper])
+history = model1.fit(train_data, train_labels, epochs=15, batch_size=16, validation_data=(val_data, val_labels), callbacks=[reduce_lr, early_stopper])
 emb_history[i] = history.history
 test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
 print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
