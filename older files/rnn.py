@@ -10,6 +10,8 @@ from keras.datasets import imdb
 from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.optimizers import Adam
 
+from tensorflow.keras.regularizers import l2
+
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -98,7 +100,7 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         #outputs 256  x embedding_data
         Dropout(0.25),
         # outputs 256 x embedding_data
-        Dense(hidden_units, activation='relu'),
+        Dense(hidden_units, activation='relu', kernel_regularizer=l2(0.04)),
         Dense(3, activation='softmax')
 
         #Dense(1, activation='sigmoid')
@@ -153,7 +155,7 @@ model1.summary()
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
 early_stopper   =   EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-history = model1.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), callbacks=[early_stopping])
+history = model1.fit(train_data, train_labels, epochs=7, batch_size=32, validation_data=(val_data, val_labels), callbacks=[early_stopper])
 emb_history[i] = history.history
 test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
 print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
@@ -172,7 +174,7 @@ def boostrap_binary_cross_entropy(data, labels, n_iter):
         loss        =   -1  * np.mean(labels_boot *   np.log(data_boot_pred) +   (1  -   labels_boot) * np.log(1 - data_boot_pred))
         bootstrap_accuracy.append(accuracy)
         bootstrap_loss.append(loss)
-    mean_acc = np.mean(bootstrap_acc)
+    mean_acc = np.mean(bootstrap_accuracy)
     mean_loss = np.mean(bootstrap_loss)
     return mean_acc, mean_loss
 #bootstrap_acc,bootstrap_loss = boostrap_binary_cross_entropy(train_data,train_labels,1000)
