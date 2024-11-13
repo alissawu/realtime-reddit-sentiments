@@ -150,12 +150,12 @@ emb_history =   {}
 
 model1 = build_model(vocab_size,embedding_dimension, 16, embedding_matrix)
 # model1.compile(optimizer=Adam(learning_rate=0.004), loss='binary_crossentropy', metrics=['accuracy'])
-model1.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model1.compile(optimizer=Adam(learning_rate=0.004), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 model1.summary()
 
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
 early_stopper   =   EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-history = model1.fit(train_data, train_labels, epochs=11, batch_size=32, validation_data=(val_data, val_labels), callbacks=[early_stopper])
+history = model1.fit(train_data, train_labels, epochs=11, batch_size=16, validation_data=(val_data, val_labels), callbacks=[early_stopper])
 emb_history[i] = history.history
 test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
 print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
