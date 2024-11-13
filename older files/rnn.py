@@ -105,6 +105,7 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         Dense(hidden_units, activation='relu', kernel_regularizer=l2(0.04)),
         Dense(3, activation='softmax')
 
+
         #Dense(1, activation='sigmoid')
     ])
     return model
@@ -150,6 +151,9 @@ emb_history =   {}
     emb_history[i] = history.history
     test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)"""
 class neurActivationMonitor(Callback):
+    def __init__(self, validation_data):
+        super().__init__()
+        self.validation_data = validation_data
     def on_epoch_end(self,epoch,logs=None):
         for layer_indexer,layer in enumerate(self.model.layers):
              if 'dense' in  layer.name  or 'lstm'   in  layer.name:
@@ -159,7 +163,7 @@ class neurActivationMonitor(Callback):
                     zero_activations    =   np.sum(activations==0)
                     total_neurons   =   activations.size
                     zero_percent  =   100 * zero_activations / total_neurons
-                    print(f'LAYER {layer.name}  -   {zero_percent}% of  neurons are dead')
+                    print(f'EPOCH {epoch}, LAYER {layer.name}  -   {zero_percent}% of  neurons are dead')
 monitor = neurActivationMonitor()
 
 tensorboard_callback = TensorBoard(log_dir='./logs', histogram_freq=1, write_graph=True)
