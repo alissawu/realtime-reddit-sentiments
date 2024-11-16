@@ -1,5 +1,5 @@
 # what i was doing real quick before i realized you commited a torch thing LMNFAO sigh
-from ensurepip import bootstrap
+#from ensurepip import bootstrap
 import requests
 import tensorflow as tf
 # noinspection PyUnresolvedReferences
@@ -12,10 +12,11 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.activations import swish
 from tensorflow.keras.regularizers import l2
 
-
+from sklearn.utils import resample
+from sklearn.metrics import accuracy_score
 import numpy as np
 import matplotlib.pyplot as plt
-from keras.src.layers import TextVectorization
+#from keras.src.layers import TextVectorization
 # const for data preprocessing
 max_length = 256  #2^8 max length of the sequences
 padding_type = 'post'  # padding type for sequences shorter than the maximum length
@@ -212,6 +213,38 @@ for dimensions,history  in  emb_history.items():
     plt.plot(history['loss'], label=f'Train Loss Acc (Embedding Dim {dimensions})', linestyle='-',color=colors[counter])
     plt.plot(history['val_loss'], label=f'Val Loss (Embedding Dim {dimensions})', linestyle='-.',color=colors[counter])
     counter +=  1
+
+
+num_bootstrap_samples = 400  # Adjust this as needed for more or fewer bootstrap samples
+epochs = 5
+bootstrap_accuracies = []
+
+for i in range(num_bootstrap_samples):
+    print(f"Bootstrap Sample {i + 1}/{num_bootstrap_samples}")
+
+    train_data_resampled, train_labels_resampled = resample(train_data, train_labels, replace=True)
+
+    model = build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix=embedding_matrix)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+    model.fit(train_data_resampled, train_labels_resampled, epochs=epochs, validation_data=(test_data, test_labels),
+              verbose=0)
+
+    predictions = model.predict(test_data)
+    predicted_classes = np.argmax(predictions, axis=1)
+    true_classes = np.argmax(test_labels, axis=1)
+    accuracy = accuracy_score(true_classes, predicted_classes)
+    bootstrap_accuracies.append(accuracy)
+    print(f"Accuracy for sample {i + 1}: {accuracy:.4f}")
+
+mean_accuracy = np.mean(bootstrap_accuracies)
+std_dev_accuracy = np.std(bootstrap_accuracies)
+conf_interval = (mean_accuracy - 1.96 * std_dev_accuracy, mean_accuracy + 1.96 * std_dev_accuracy)
+
+print(f"\nBootstrap Results:")
+print(f"Mean Accuracy: {mean_accuracy:.4f}")
+print(f"95% Confidence Interval for Accuracy: {conf_interval}")
+
 plt.title('Training and Validation Accuracy and Loss over Epochs for Different Embedding Dimensions')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
