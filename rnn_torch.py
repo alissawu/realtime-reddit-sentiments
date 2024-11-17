@@ -1,14 +1,31 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from attr.validators import max_len
+from torch.utils.tensorboard    import  SummaryWriter
 from torch.utils.data import DataLoader, TensorDataset, random_split
-from torchtext.data import imdb
+from torchtext.data import IMDB
+from torchtext.vocab    import vocab
+from    collections import  Counter,    OrderedDict
+import numpy    as np
+import requests
+
+
+
+
+#params
+max_len =   256
+padding_type    =   'post'
+vocab_size  =   65536
+embedding_dim   =   100
+
+train_data,test_data    =   IMDB()
+
 
 #from keras.datasets import imdb
 #ffrom keras.preprocessing.sequence import pad_sequences
 
 # Load IMDB dataset
-vocabulary_size = 30000
  (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
