@@ -7,6 +7,7 @@ from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
 from keras.layers import Embedding, LSTM, Bidirectional, GlobalAveragePooling1D, Dense, Dropout
 from keras.datasets import imdb
+from keras.src.layers import GlobalMaxPooling1D
 from tensorflow.keras.callbacks import Callback, TensorBoard, ReduceLROnPlateau, EarlyStopping
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.activations import swish
@@ -98,7 +99,7 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         Bidirectional(LSTM(256, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25)),
         Bidirectional(LSTM(128, activation='tanh', return_sequences=True, dropout=0.25, recurrent_dropout=0.25)),
         Dense(64, activation    =   swish),
-        GlobalAveragePooling1D(),
+        GlobalMaxPooling1D(),
         #GlobalAveragePooling1D(),
         #outputs 256  x embedding_data
         Dropout(0.25),
@@ -229,8 +230,8 @@ for i in range(num_bootstrap_samples):
 
     model.fit(train_data_resampled, train_labels_resampled, epochs=epochs, validation_data=(test_data, test_labels),
               verbose=0)
-
-    predictions = model.predict(test_data)
+    #pop an argmax on
+    predictions = np.argmax(model.predict(test_data),axis=1)
     predicted_classes = np.argmax(predictions, axis=1)
     true_classes = np.argmax(test_labels, axis=1)
     accuracy = accuracy_score(true_classes, predicted_classes)
