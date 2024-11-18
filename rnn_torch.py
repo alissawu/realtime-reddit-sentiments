@@ -2,16 +2,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from attr.validators import max_len
-from torch.utils.tensorboard    import  SummaryWriter
-from torch.utils.data import DataLoader, TensorDataset, random_split
-from torchtext.data import IMDB
-from torchtext.vocab    import vocab
-from    collections import  Counter,    OrderedDict
+#from torch.utils.tensorboard    import  SummaryWriter
+from torchtext.datasets import IMDB
+from torchtext.data import Field,   LabelField, BucketIterator, DataLoader, TensorDataset, random_split
+from torchtext.vocab    import vocab,   GloVe
+#from    collections import  Counter,    OrderedDict
 import numpy    as np
 import requests
 
-
-
+from epoch_test import batch_size
 
 #params
 max_len =   256
@@ -19,13 +18,48 @@ padding_type    =   'post'
 vocab_size  =   65536
 embedding_dim   =   100
 
-train_data,test_data    =   IMDB()
+#hypers
+batch_size  =   16
+
+TEXT    =   Field(sequential=True,  tokenize='spacy', lower=True,   batch_first=True,   fix_length=max_len, include_lengths=True)
+LABEL   =   LabelField(dtype=torch.float, batch_first=True)
+train_data, test_data = IMDB.splits(TEXT, LABEL)
+
+TEXT.build_vocab(train_data, vectors=GloVe(name='6B', dim=100))
+LABEL.build_vocab(train_data)
+
+split_1 = 5 / 2
+split_2 = 20 / 17
+split_1_index = int(len(test_data) // split_1)
+split_2_index = int(len(test_data) // split_2) + 1
+
+train_data.examples += test_data.examples[:split_1_index]
+val_data = test_data.examples[split_1_index:split_2_index]
+test_data = test_data.examples[split_2_index:]
+
+from torchtext.data.dataset import  Dataset
+val_data    =   Dataset(val_data,fields={'text':TEXT,'label':LABEL})
+test_data   =   Dataset(test_data,fields={'text':TEXT,'label':LABEL})
 
 
-#from keras.datasets import imdb
-#ffrom keras.preprocessing.sequence import pad_sequences
+
+train_iter, test_iter = BucketIterator.splits(
+    (train_data, test_data),
+    batch_size=batch_size,
+    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+)
+
 
 # Load IMDB dataset
+train_data,test_data    =   IMDB()
+train_labels,   test_labels =   [], []
+train_seq,  test_seq    =   []
+
+word_counter    =   Counter()
+for label,  line    in  train_data:
+    train_seq.append(line)
+    train_labels.append(1   if  label   ==  'pos'   else    0)
+
  (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
