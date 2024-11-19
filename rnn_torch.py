@@ -52,6 +52,14 @@ train_iter, test_iter = BucketIterator.splits(
     batch_size=batch_size,
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 )
+class   cnnToLSTMCustom(nn.Module):
+    def __init__(self):
+        super(cnnToLSTMCustom,self).__init__()
+        kern2s1 =   nn.Conv1d(in_channels=256,out_channels=(256-2)+1,kernel_size=2,stride=1)
+        kern3s3 =   nn.Conv1d(in_channels=256,out_channels=(256-3-2*2)/3+1,kernel_size=3,stride=3,    padding=2)
+        kern6s3 =   nn.Conv1d(in_channels=256,out_channels=(256-6-2*2)/3+1,kernel_size=6,stride=3, padding=2)
+        kern4s1 =   nn.Conv1d(in_channels=256,out_channels=(256-4)/2+1,kernel_size=4,stride=1)#stride 2 or 1
+256-5-2*p / 3
 
 class   initialSentModel(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
