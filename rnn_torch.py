@@ -7,6 +7,8 @@ from torchtext.datasets import IMDB
 from torchtext.data import Field,   LabelField, BucketIterator, DataLoader, TensorDataset, random_split
 from torchtext.vocab    import vocab,   GloVe
 #from    collections import  Counter,    OrderedDict
+#https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
+
 import numpy    as np
 import requests
 
@@ -16,16 +18,19 @@ from epoch_test import batch_size
 max_len =   256
 padding_type    =   'post'
 vocab_size  =   65536
-embedding_dim   =   100
+embedding_dim   =   300
 
 #hypers
 batch_size  =   16
+epoch_count =   15
+lr      =   0.004
+min_lr  =   0.0005
 
 TEXT    =   Field(sequential=True,  tokenize='spacy', lower=True,   batch_first=True,   fix_length=max_len, include_lengths=True)
 LABEL   =   LabelField(dtype=torch.float, batch_first=True)
 train_data, test_data = IMDB.splits(TEXT, LABEL)
 
-TEXT.build_vocab(train_data, vectors=GloVe(name='6B', dim=100))
+TEXT.build_vocab(train_data, vectors=GloVe(name='6B', dim=embedding_dim))
 LABEL.build_vocab(train_data)
 
 split_1 = 5 / 2
@@ -42,25 +47,26 @@ val_data    =   Dataset(val_data,fields={'text':TEXT,'label':LABEL})
 test_data   =   Dataset(test_data,fields={'text':TEXT,'label':LABEL})
 
 
-
 train_iter, test_iter = BucketIterator.splits(
     (train_data, test_data),
     batch_size=batch_size,
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 )
 
+class   initialSentModel(nn.Module):
+    def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
+        super(initialSentModel,    self).__init__()
+        self.recurrDropout =   0.25
+        self.embedding = nn.Embedding.from_embedding(pre_train_embeds,freeze=False)
+                #max_norm (float, optional) – See module initialization documentation.
+                #norm_type (float, optional) – See module initialization documentation. Default 2.
+                #scale_grad_by_freq (bool, optional) – See module initialization documentation. Default False.
+                #sparse (bool, optional) – See module initialization documentation.
+        self.lstm1 = nn.LSTM(300, 512, batch_first=True,bidirectional=True)
+        self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
 
-# Load IMDB dataset
-train_data,test_data    =   IMDB()
-train_labels,   test_labels =   [], []
-train_seq,  test_seq    =   []
 
-word_counter    =   Counter()
-for label,  line    in  train_data:
-    train_seq.append(line)
-    train_labels.append(1   if  label   ==  'pos'   else    0)
-
- (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
+(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
 # Pad sequences to ensure uniform length
