@@ -14,7 +14,7 @@ from tensorflow.keras.activations import swish
 from tensorflow.keras.regularizers import l2
 
 from sklearn.utils import resample
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 import numpy as np
 import matplotlib.pyplot as plt
 #from keras.src.layers import TextVectorization
@@ -59,7 +59,7 @@ train_data = preprocess_data(train_data)
 test_data = preprocess_data(test_data)
 val_data = preprocess_data(val_data)
 
-
+300
 # get full vocab
 url =   "http://nlp.stanford.edu/data/glove.6B.100d.txt"
 top_words = {word: index for word, index in word_index.items() if index < vocab_size}
@@ -78,7 +78,7 @@ for line in response.iter_lines():
 
 
 #embedding_dimensions    =   [2**i for i in range(4,9)]
-embedding_dimension    =   100
+embedding_dimension    =   300
 
 embedding_matrix = np.zeros([vocab_size, embedding_dimension])
 
@@ -105,7 +105,7 @@ def build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix
         Dropout(0.25),
         # outputs 256 x embedding_data
         Dense(hidden_units, activation='relu', kernel_regularizer=l2(0.04)),
-        Dense(3, activation='softmax')
+        Dense(2, activation='softmax')
 
 
         #Dense(1, activation='sigmoid')
@@ -178,10 +178,24 @@ model1.summary()
 # Train and evaluate our model based on imdb review data ONLY - no reddit yet
 reduce_lr   =   ReduceLROnPlateau(monitor='val_loss', factor=0.5,patience   =   2,  min_lr  =   0.00025)
 early_stopper   =   EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-history = model1.fit(train_data, train_labels, epochs=15, batch_size=16, validation_data=(val_data, val_labels), callbacks=[tensorboard_callback, monitor, reduce_lr, early_stopper])
+history = model1.fit(train_data, train_labels, epochs=7, batch_size=16, validation_data=(val_data, val_labels), callbacks=[tensorboard_callback, monitor, reduce_lr, early_stopper])
 emb_history[i] = history.history
+
+# Evaluate on the test set
 test_loss, test_acc = model1.evaluate(test_data, test_labels, verbose=2)
 print(f"Test Accuracy: {test_acc}, Test Loss: {test_loss}")
+
+# Make predictions
+predictions = np.argmax(model1.predict(test_data), axis=1)
+
+# Calculate F1 scores
+macro_f1 = f1_score(test_labels, predictions, average='macro')
+micro_f1 = f1_score(test_labels, predictions, average='micro')
+
+# Print the results
+print(f"Macro F1 Score: {macro_f1:.4f}")
+print(f"Micro F1 Score: {micro_f1:.4f}")
+
 
 def boostrap_binary_cross_entropy(data, labels, n_iter):
     bootstrap_accuracy =   []
@@ -215,7 +229,7 @@ for dimensions,history  in  emb_history.items():
     plt.plot(history['val_loss'], label=f'Val Loss (Embedding Dim {dimensions})', linestyle='-.',color=colors[counter])
     counter +=  1
 
-
+"""
 num_bootstrap_samples = 400  # Adjust this as needed for more or fewer bootstrap samples
 epochs = 5
 bootstrap_accuracies = []
@@ -225,7 +239,7 @@ for i in range(num_bootstrap_samples):
 
     train_data_resampled, train_labels_resampled = resample(train_data, train_labels, replace=True)
 
-    model = build_model(vocab_size, embedding_dim=256, hidden_units=16, embedding_matrix=embedding_matrix)
+    model = build_model(vocab_size, embedding_dim=100, hidden_units=16, embedding_matrix=embedding_matrix)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     model.fit(train_data_resampled, train_labels_resampled, epochs=epochs, validation_data=(test_data, test_labels),
@@ -245,7 +259,7 @@ conf_interval = (mean_accuracy - 1.96 * std_dev_accuracy, mean_accuracy + 1.96 *
 print(f"\nBootstrap Results:")
 print(f"Mean Accuracy: {mean_accuracy:.4f}")
 print(f"95% Confidence Interval for Accuracy: {conf_interval}")
-
+"""
 plt.title('Training and Validation Accuracy and Loss over Epochs for Different Embedding Dimensions')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
