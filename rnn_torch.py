@@ -117,9 +117,60 @@ for i in range(num_filters):
     indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
     # Assign the input filter values as imaginary numbers to the output at the computed indices
     output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+"""# Step 3: Populate the indices for each filter, making values imaginary
+for idx, i in enumerate(range(0, len(indices), 4)):
+    # Assign the input values to the imaginary part of the output tensor
+    output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
+"""
+
+import torch
+
+# Original tensor of shape (N, 300, 86)
+N, seq_len, num_filters = 4, 300, 86  # Example sizes
+input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+
+# Step 1: Create an output tensor of zeros with shape (N, 300, 512)
+output_tensor = torch.zeros(N, seq_len, 256 * 2)
+
+# Step 2: Assign values for the outlier 0 filter
+output_tensor[:, :, [1, 3]] = input_tensor[:, :, 0].unsqueeze(-1)
+
+# Step 3: Assign values for regular filters 1 to 84
+for i in range(1, 85):
+    indices = [6*i-1, 6*i+1, 6*i+3]
+    output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
+
+# Step 4: Assign values for the outlier 85 filter
+output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
+
+#Kern6 with imag
+
+import torch
+
+# Original tensor of shape (N, 300, 85)
+N, seq_len, num_filters = 4, 300, 85  # Example sizes
+input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+
+# Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
+output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
+
+# Step 2: Populate the indices for each filter
+# Outlier filter 0
+output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+
+# Regular filters 1 to 83
+for i in range(1, 84):
+    indices = [6*i-1, 6*i+1, 6*i+3, 6*i+4, 6*(i+1), 6*(i+1)+2]
+    output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
+
+# Outlier filter 84
+output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
 
 # Step 3: Validate the result
 print(output_tensor.shape)  # Should be (N, 300, 512)
+
+
+
 
 
 
