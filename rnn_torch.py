@@ -55,11 +55,86 @@ train_iter, test_iter = BucketIterator.splits(
 class   cnnToLSTMCustom(nn.Module):
     def __init__(self):
         super(cnnToLSTMCustom,self).__init__()
-        kern2s1 =   nn.Conv1d(in_channels=256,out_channels=(256-2)+1,kernel_size=2,stride=1)
-        kern3s3 =   nn.Conv1d(in_channels=256,out_channels=(256-3-2*2)/3+1,kernel_size=3,stride=3,    padding=2)
-        kern6s3 =   nn.Conv1d(in_channels=256,out_channels=(256-6-2*2)/3+1,kernel_size=6,stride=3, padding=2)
-        kern4s1 =   nn.Conv1d(in_channels=256,out_channels=(256-4)/2+1,kernel_size=4,stride=1)#stride 2 or 1
-256-5-2*p / 3
+        #top k2 k4
+        #range(0,256,1)
+        self.kern2s1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=2,stride=1) #255
+        self.kern4s2 = nn.Conv1d(in_channels=256, out_channels=300, kernel_size=4, stride=2)#127
+        #mid k3 k6
+        self.kern3s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=3,stride=3, padding=1)#(253+2*1)/3+1=86
+        self.kern6s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=6,stride=3, padding=1)#(250+2*1)/3+1 = 85
+        #bottom k4
+        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=(256-5-2)/3+1,kernel_size=5,stride=3,padding=1)#(251+2*2)/3+1=86
+    def forward(self,x_inp):
+        topk2=self.kern2s1(x_inp)
+        topk4=self.kern4s2(x_inp)
+
+        midk3=self.kern3s3p1(x_inp)
+        midk6=self.kern6s3p1(x_inp)
+
+
+# Original tensor of shape (N, 300, 255)
+N, seq_len, num_filters = 4, 300, 255  # Example sizes
+input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+
+# Step 1: Create an output tensor of zeros with shape (N, 300, 512)
+output_tensor = torch.zeros(N, seq_len, 256 * 2)
+## Create index mapping for placement
+#indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
+#indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
+
+# Create the output tensor
+#output_tensor = torch.zeros(N, seq_len, 512)
+
+# Assign values
+#output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
+#output_tensor[:, :, 2:-1:2] = input_tensor  # Populate indices (2i+2)
+#
+#
+#
+# Step 2: Assign values for each filter to the mapped indices
+for i in range(num_filters):
+    # For each filter, map to positions 2i+1 and 2i+2
+    output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
+    output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
+
+# Check the resulting shape
+print(output_tensor.shape)  # Should be (N, 300, 512)
+
+# 4k kernels
+
+
+
+# Original tensor of shape (N, 300, 127)
+N, seq_len, num_filters = 4, 300, 127  # Example sizes
+
+
+# Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
+output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
+
+# Step 2: Assign imaginary values for each filter
+for i in range(num_filters):
+    # Compute target indices for filter i
+    indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
+    # Assign the input filter values as imaginary numbers to the output at the computed indices
+    output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+# Step 3: Validate the result
+print(output_tensor.shape)  # Should be (N, 300, 512)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class   initialSentModel(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
