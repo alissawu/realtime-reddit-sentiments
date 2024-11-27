@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from attr.validators import max_len
+from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
 from torchtext.datasets import IMDB
 from torchtext.data import Field,   LabelField, BucketIterator, DataLoader, TensorDataset, random_split
@@ -63,111 +64,110 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern3s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=3,stride=3, padding=1)#(253+2*1)/3+1=86
         self.kern6s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=6,stride=3, padding=1)#(250+2*1)/3+1 = 85
         #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=(256-5-2)/3+1,kernel_size=5,stride=3,padding=1)#(251+2*2)/3+1=86
+        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=5,stride=3,padding=1)#(251+2*2)/3+1=86
     def forward(self,x_inp):
-        topk2=self.kern2s1(x_inp)
-        topk4=self.kern4s2(x_inp)
-
+        topk2   =   self.kern2s1(x_inp)
+        transform_topk2 =   self.kern2ImagTransformer(topk2.transpose(1,2))
+        topk4   =   self.kern4s2(x_inp)
+        transform_topk4 =   self.kern4ImagTransformer(topk4.transpose(1,2))
+        upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
         midk3=self.kern3s3p1(x_inp)
+        transform_midk3 = self.kern3ImagTransformer(midk3.transpose(1,2))
         midk6=self.kern6s3p1(x_inp)
+        transform_midk6 = self.kern6ImagTransformer(midk6.transpose(1,2))
+        middle  =   torch.cat([transform_midk3,transform_midk6],dim=-1)
+    def kern2ImagTransformer(self,input_tensor):
+        # Original tensor of shape (N, 300, 255)
+        N, seq_len, num_filters = 4, 300, 255  # Example sizes
+        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
 
+        ## Create index mapping for placement
+        #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
+        #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
-# Original tensor of shape (N, 300, 255)
-N, seq_len, num_filters = 4, 300, 255  # Example sizes
-input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        # Create the output tensor
+        #output_tensor = torch.zeros(N, seq_len, 512)
 
-# Step 1: Create an output tensor of zeros with shape (N, 300, 512)
-output_tensor = torch.zeros(N, seq_len, 256 * 2)
-## Create index mapping for placement
-#indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
-#indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
+        # Assign values
+        #output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
+        #output_tensor[:, :, 2:-1:2] = input_tensor  # Populate indices (2i+2)
+        #
+        #
+        #
+        # Step 2: Assign values for each filter to the mapped indices
+        for i in range(num_filters):
+            # For each filter, map to positions 2i+1 and 2i+2
+            output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
+            output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
-# Create the output tensor
-#output_tensor = torch.zeros(N, seq_len, 512)
-
-# Assign values
-#output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
-#output_tensor[:, :, 2:-1:2] = input_tensor  # Populate indices (2i+2)
-#
-#
-#
-# Step 2: Assign values for each filter to the mapped indices
-for i in range(num_filters):
-    # For each filter, map to positions 2i+1 and 2i+2
-    output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
-    output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
-
-# Check the resulting shape
-print(output_tensor.shape)  # Should be (N, 300, 512)
-
-# 4k kernels
+        print(output_tensor.shape)  # Should be (N, 300, 512)
 
 
 
-# Original tensor of shape (N, 300, 127)
-N, seq_len, num_filters = 4, 300, 127  # Example sizes
+    def kern4ImagTransformer(self,output_tensor):
+        # Original tensor of shape (N, 300, 127)
+        N, seq_len, num_filters = 4, 300, 127  # Example sizes
 
 
-# Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
-output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
+        output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
 
-# Step 2: Assign imaginary values for each filter
-for i in range(num_filters):
-    # Compute target indices for filter i
-    indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
-    # Assign the input filter values as imaginary numbers to the output at the computed indices
-    output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
-"""# Step 3: Populate the indices for each filter, making values imaginary
-for idx, i in enumerate(range(0, len(indices), 4)):
-    # Assign the input values to the imaginary part of the output tensor
-    output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
-"""
+        # Step 2: Assign imaginary values for each filter
+        for i in range(num_filters):
+            # Compute target indices for filter i
+            indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
+            # Assign the input filter values as imaginary numbers to the output at the computed indices
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+        """# Step 3: Populate the indices for each filter, making values imaginary
+        for idx, i in enumerate(range(0, len(indices), 4)):
+            # Assign the input values to the imaginary part of the output tensor
+            output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
+        """
 
-import torch
+    def kern3Transformer(self,input_tensor):
+        # Original tensor of shape (N, 300, 86)
+        N, seq_len, num_filters = 4, 300, 86  # Example sizes
+        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
 
-# Original tensor of shape (N, 300, 86)
-N, seq_len, num_filters = 4, 300, 86  # Example sizes
-input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 512)
+        output_tensor = torch.zeros(N, seq_len, 256 * 2)
 
-# Step 1: Create an output tensor of zeros with shape (N, 300, 512)
-output_tensor = torch.zeros(N, seq_len, 256 * 2)
+        # Step 2: Assign values for the outlier 0 filter
+        output_tensor[:, :, [1, 3]] = input_tensor[:, :, 0].unsqueeze(-1)
 
-# Step 2: Assign values for the outlier 0 filter
-output_tensor[:, :, [1, 3]] = input_tensor[:, :, 0].unsqueeze(-1)
+        # Step 3: Assign values for regular filters 1 to 84
+        for i in range(1, 85):
+            indices = [6*i-1, 6*i+1, 6*i+3]
+            output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
 
-# Step 3: Assign values for regular filters 1 to 84
-for i in range(1, 85):
-    indices = [6*i-1, 6*i+1, 6*i+3]
-    output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
+        # Step 4: Assign values for the outlier 85 filter
+        output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
 
-# Step 4: Assign values for the outlier 85 filter
-output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
+    #Kern6 with imag
 
-#Kern6 with imag
+    def kern6ImagTransformer(self,input_tensor):
 
-import torch
+        # Original tensor of shape (N, 300, 85)
+        N, seq_len, num_filters = 4, 300, 85  # Example sizes
+        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
 
-# Original tensor of shape (N, 300, 85)
-N, seq_len, num_filters = 4, 300, 85  # Example sizes
-input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
+        output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
 
-# Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
-output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
+        # Step 2: Populate the indices for each filter
+        # Outlier filter 0
+        output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
 
-# Step 2: Populate the indices for each filter
-# Outlier filter 0
-output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+        # Regular filters 1 to 83
+        for i in range(1, 84):
+            indices = [6*i-1, 6*i+1, 6*i+3, 6*i+4, 6*(i+1), 6*(i+1)+2]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
 
-# Regular filters 1 to 83
-for i in range(1, 84):
-    indices = [6*i-1, 6*i+1, 6*i+3, 6*i+4, 6*(i+1), 6*(i+1)+2]
-    output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
+        # Outlier filter 84
+        output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
 
-# Outlier filter 84
-output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
-
-# Step 3: Validate the result
-print(output_tensor.shape)  # Should be (N, 300, 512)
+        # Step 3: Validate the result
+        print(output_tensor.shape)  # Should be (N, 300, 512)
 
 
 
