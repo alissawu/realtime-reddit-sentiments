@@ -109,8 +109,6 @@ class   cnnToLSTMCustom(nn.Module):
 
         print(output_tensor.shape)  # Should be (N, 300, 512)
 
-
-
     def kern4ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 127)
         N, embedding_dim, num_filters = 4, 300, 127  # Example sizes
@@ -159,9 +157,7 @@ class   cnnToLSTMCustom(nn.Module):
 
         # Outlier filter 84
         output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
-
-#        print(output_tensor.shape)  # Should be (N, 300, 512)
-
+        
     def kern5ImagTransformer(self,input_tensor):
         """
         Transform input tensor of shape (N, 300, 86) into (N, 300, 512)
