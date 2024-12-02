@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from attr.validators import max_len
 from jsonschema.benchmarks.contains import middle
@@ -60,6 +61,10 @@ class   cnnToLSTMCustom(nn.Module):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
+        self.embed  =   nn.Embedding(vocab_size, embedding_dim)
+        self.embed.weight.data.copy_(pretrained_vecs)
+        self.embed.weight.requires_grad = False
+
         self.kern2s1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=2,stride=1) #255
         self.kern4s2 = nn.Conv1d(in_channels=256, out_channels=300, kernel_size=4, stride=2)#127
         #mid k3 k6
@@ -67,22 +72,67 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern6s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=6,stride=3, padding=1)#(250+2*1)/3+1 = 85
         #bottom k4
         self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=5,stride=3,padding=2)#(251+2*2)/3+1=86
-    def forward(self,x_inp):
-        x_inp
-        topk2   =   self.kern2s1(x_inp)
+        self.uppLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
+        self.midLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
+        self.lowLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
+
+        self.weights    =   nn.Parameter(nn.torch([],dtype=torch.float))
+
+        self.fc1    =   nn.Linear(256,16)
+        self.dropout = nn.Dropout(0.25)
+        self.fc2 = nn.Linear(16,2)
+
+    def forward(self,x):
+        x   =   self.embed(x_inp).permute(0,2,1)
+        embedding_tensor    =   torch.zeros(N, embedding_dim, 512)
+
+        embedding_tensor[:, :, 1::2]    =   x
+        topk2   =   self.kern2s1(x)
         transform_topk2 =   self.kern2ImagTransformer(topk2.transpose(1,2))
-        topk4   =   self.kern4s2(x_inp)
+        topk4   =   self.kern4s2(x)
         transform_topk4 =   self.kern4ImagTransformer(topk4.transpose(1,2))
         #upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
-        upper   =   transform_topk2+transform_topk4
-        midk3=self.kern3s3p1(x_inp)
+        upper   =   transform_topk2 +   transform_topk4
+        midk3=self.kern3s3p1(x)
         transform_midk3 = self.kern3ImagTransformer(midk3.transpose(1,2))
-        midk6=self.kern6s3p1(x_inp)
+        midk6=self.kern6s3p1(x)
         transform_midk6 = self.kern6ImagTransformer(midk6.transpose(1,2))
-        middle  =   transform_midk3+transform_midk6
-        lowk5 = self.kern5s3p1(x_inp)
+        middle  =   transform_midk3 +   transform_midk6
+        lowk5 = self.kern5s3p1(x)
         transform_lowk5 = self.kern5ImagTransformer(lowk5.transpose(1,2))
-        lower  =    transform_lowk5
+        lower  =    embedding_tensor    +   transform_lowk5
+        upp_outputs,_ =   self.uppLSTM(upper)
+        mid_outputs,_ =   self.midLSTM(middle)
+        low_outputs,_ =   self.lowLSTM(lower)
+
+        pair12  =   upp_outputs +   mid_outputs
+        pair23  =   mid_outputs +   upp_outputs
+        pair13  =   low_outputs +   upp_outputs
+        trip    =   upp_outputs +   mid_outputs +   low_outputs
+
+        normedWeights   =   F.softmax(self.weights,dim=0)
+
+
+
+        fused   =   torch.mean((
+            normedWeights[0]    *   pair12,
+            normedWeights[1]    *   pair23,
+            normedWeights[2]    *   pair13,
+            normedWeights[3]    *   trip
+        ),dim=1)
+
+        even_cells = fused[:, 0::2, :]  # Select even indices
+        odd_cells = fused[:, 1::2, :]
+        crunched = torch.cat(even_cells, odd_cells, dim=-1)
+        swisher =   F.swish(self.fc1(crunched))
+        dropOuts    =   self.dropout(swisher)
+        outputs =   F.softmax(self.fc2(dropOuts),dim=1)
+        return outputs
+
+
+
+
+
     def kern2ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 255)
         N, seq_len, num_filters = 4, 300, 255  # Example sizes
@@ -157,7 +207,7 @@ class   cnnToLSTMCustom(nn.Module):
 
         # Outlier filter 84
         output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
-        
+
     def kern5ImagTransformer(self,input_tensor):
         """
         Transform input tensor of shape (N, 300, 86) into (N, 300, 512)
