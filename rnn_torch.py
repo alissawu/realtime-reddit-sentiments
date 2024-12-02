@@ -34,6 +34,8 @@ train_data, test_data = IMDB.splits(TEXT, LABEL)
 TEXT.build_vocab(train_data, vectors=GloVe(name='6B', dim=embedding_dim))
 LABEL.build_vocab(train_data)
 
+pretrained_vectors = TEXT.vocab.vectors
+
 split_1 = 5 / 2
 split_2 = 20 / 17
 split_1_index = int(len(test_data) // split_1)
@@ -54,7 +56,7 @@ train_iter, test_iter = BucketIterator.splits(
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 )
 class   cnnToLSTMCustom(nn.Module):
-    def __init__(self):
+    def __init__(self,vocab_size, embedding_dim, pretrained_vecs):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
@@ -64,23 +66,28 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern3s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=3,stride=3, padding=1)#(253+2*1)/3+1=86
         self.kern6s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=6,stride=3, padding=1)#(250+2*1)/3+1 = 85
         #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=5,stride=3,padding=1)#(251+2*2)/3+1=86
+        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=5,stride=3,padding=2)#(251+2*2)/3+1=86
     def forward(self,x_inp):
+        x_inp
         topk2   =   self.kern2s1(x_inp)
         transform_topk2 =   self.kern2ImagTransformer(topk2.transpose(1,2))
         topk4   =   self.kern4s2(x_inp)
         transform_topk4 =   self.kern4ImagTransformer(topk4.transpose(1,2))
-        upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
+        #upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
+        upper   =   transform_topk2+transform_topk4
         midk3=self.kern3s3p1(x_inp)
         transform_midk3 = self.kern3ImagTransformer(midk3.transpose(1,2))
         midk6=self.kern6s3p1(x_inp)
         transform_midk6 = self.kern6ImagTransformer(midk6.transpose(1,2))
-        middle  =   torch.cat([transform_midk3,transform_midk6],dim=-1)
+        middle  =   transform_midk3+transform_midk6
+        lowk5 = self.kern5s3p1(x_inp)
+        transform_lowk5 = self.kern5ImagTransformer(lowk5.transpose(1,2))
+        lower  =    transform_lowk5
     def kern2ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 255)
         N, seq_len, num_filters = 4, 300, 255  # Example sizes
-        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
-
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        #input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
         ## Create index mapping for placement
         #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
         #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
@@ -104,15 +111,11 @@ class   cnnToLSTMCustom(nn.Module):
 
 
 
-    def kern4ImagTransformer(self,output_tensor):
+    def kern4ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 127)
-        N, seq_len, num_filters = 4, 300, 127  # Example sizes
-
-
-        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
-        output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
-
-        # Step 2: Assign imaginary values for each filter
+        N, embedding_dim, num_filters = 4, 300, 127  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
         for i in range(num_filters):
             # Compute target indices for filter i
             indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
@@ -126,35 +129,26 @@ class   cnnToLSTMCustom(nn.Module):
 
     def kern3Transformer(self,input_tensor):
         # Original tensor of shape (N, 300, 86)
-        N, seq_len, num_filters = 4, 300, 86  # Example sizes
-        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        N, embedding_dim, num_filters = 16, 300, 86  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
 
-        # Step 1: Create an output tensor of zeros with shape (N, 300, 512)
-        output_tensor = torch.zeros(N, seq_len, 256 * 2)
-
-        # Step 2: Assign values for the outlier 0 filter
+        #values for the outlier 0 filter
         output_tensor[:, :, [1, 3]] = input_tensor[:, :, 0].unsqueeze(-1)
-
-        # Step 3: Assign values for regular filters 1 to 84
         for i in range(1, 85):
             indices = [6*i-1, 6*i+1, 6*i+3]
             output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
 
-        # Step 4: Assign values for the outlier 85 filter
+        #values for the outlier 85 filter
         output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
-
-    #Kern6 with imag
 
     def kern6ImagTransformer(self,input_tensor):
 
         # Original tensor of shape (N, 300, 85)
-        N, seq_len, num_filters = 4, 300, 85  # Example sizes
-        input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        N, embedding_dim, num_filters = 16, 300, 85  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 256 * 2, dtype=torch.complex64)
 
-        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
-        output_tensor = torch.zeros(N, seq_len, 256 * 2, dtype=torch.complex64)
-
-        # Step 2: Populate the indices for each filter
         # Outlier filter 0
         output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
 
@@ -166,28 +160,42 @@ class   cnnToLSTMCustom(nn.Module):
         # Outlier filter 84
         output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
 
-        # Step 3: Validate the result
-        print(output_tensor.shape)  # Should be (N, 300, 512)
+#        print(output_tensor.shape)  # Should be (N, 300, 512)
+
+    def kern5ImagTransformer(self,input_tensor):
+        """
+        Transform input tensor of shape (N, 300, 86) into (N, 300, 512)
+        with specified index mapping, making all assigned values imaginary.
+        """
+        # Get dimensions of the input tensor
+        N, seq_len, num_filters = input_tensor.shape
+
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
+        output_tensor = torch.zeros(N, seq_len, 512, dtype=torch.complex64)
+
+        # Step 2: Assign imaginary values for outlier filter 0
+        output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+
+        # Step 3: Assign imaginary values for regular filters 1 to 84
+        for i in range(1, 85):
+            indices = [
+                6 * (i - 1) + 2,
+                6 * (i - 1) + 4,
+                6 * (i - 1) + 7,
+                6 * (i - 1) + 9,
+                6 * (i - 1) + 11
+            ]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        # Step 4: Assign imaginary values for outlier filter 85
+        output_tensor[:, :, [506, 508, 511]] = 1j * input_tensor[:, :, 85].unsqueeze(-1)
+
+        return output_tensor
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-class   initialSentModel(nn.Module):
+"""class   initialSentModel(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
         super(initialSentModel,    self).__init__()
         self.recurrDropout =   0.25
@@ -198,13 +206,13 @@ class   initialSentModel(nn.Module):
                 #sparse (bool, optional) – See module initialization documentation.
         self.lstm1 = nn.LSTM(300, 512, batch_first=True,bidirectional=True)
         self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
-
+"""
 
 (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
 # Pad sequences to ensure uniform length
-max_words = 500
+max_words = 256
 X_train = pad_sequences(X_train, maxlen=max_words)
 X_test = pad_sequences(X_test, maxlen=max_words)
 
@@ -222,8 +230,7 @@ val_size = len(dataset) - train_size
 train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=batch_size)
-
-
+"""
 # Define the model
 class SentimentAnalysisModel(nn.Module):
     def __init__(self, vocab_size, embed_size, lstm_size, max_words):
@@ -240,10 +247,12 @@ class SentimentAnalysisModel(nn.Module):
         x = self.sigmoid(x)
         return x
 
+"""
 
 embedding_size = 32
 lstm_size = 100
-model = SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+
 
 # Define loss and optimizer
 criterion = nn.BCELoss()
