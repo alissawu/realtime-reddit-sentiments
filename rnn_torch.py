@@ -14,7 +14,7 @@ from torchtext.vocab    import vocab,   GloVe
 import numpy    as np
 import requests
 
-from epoch_test import batch_size
+from epoch_test import batch_size, train_loader
 
 #params
 max_len =   256
@@ -57,13 +57,14 @@ train_iter, test_iter = BucketIterator.splits(
     device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
 )
 class   cnnToLSTMCustom(nn.Module):
-    def __init__(self,vocab_size, embedding_dim, pretrained_vecs):
+    def __init__(self,vocab_size, embedding_dim, pretrained_vecs,batch_size):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
         self.embed  =   nn.Embedding(vocab_size, embedding_dim)
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
+        self.batch_size = batch_size
 
         self.kern2s1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=2,stride=1) #255
         self.kern4s2 = nn.Conv1d(in_channels=256, out_channels=300, kernel_size=4, stride=2)#127
@@ -83,8 +84,8 @@ class   cnnToLSTMCustom(nn.Module):
         self.fc2 = nn.Linear(16,2)
 
     def forward(self,x):
-        x   =   self.embed(x_inp).permute(0,2,1)
-        embedding_tensor    =   torch.zeros(N, embedding_dim, 512)
+        x   =   self.embed(x).permute(0,2,1)
+        embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
 
         embedding_tensor[:, :, 1::2]    =   x
         topk2   =   self.kern2s1(x)
@@ -114,17 +115,15 @@ class   cnnToLSTMCustom(nn.Module):
 
 
 
-        fused   =   torch.mean((
-            normedWeights[0]    *   pair12,
+        fused   =   torch.mean(normedWeights[0]    *   pair12,
             normedWeights[1]    *   pair23,
             normedWeights[2]    *   pair13,
-            normedWeights[3]    *   trip
-        ),dim=1)
+            normedWeights[3]    *   trip, dim=1)
 
         even_cells = fused[:, 0::2, :]  # Select even indices
         odd_cells = fused[:, 1::2, :]
         crunched = torch.cat(even_cells, odd_cells, dim=-1)
-        swisher =   F.swish(self.fc1(crunched))
+        swisher =   nn.SiLU(self.fc1(crunched))
         dropOuts    =   self.dropout(swisher)
         outputs =   F.softmax(self.fc2(dropOuts),dim=1)
         return outputs
@@ -136,7 +135,7 @@ class   cnnToLSTMCustom(nn.Module):
     def kern2ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 255)
         N, seq_len, num_filters = 4, 300, 255  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor=input_tensor.to(dtype=torch.complex64)
         #input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
         ## Create index mapping for placement
         #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
@@ -254,50 +253,10 @@ class   cnnToLSTMCustom(nn.Module):
         self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
 """
 
-(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
+(X_train, y_train), (X_test, y_test) = IMDB.load_data(num_words=vocab_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
-# Pad sequences to ensure uniform length
-max_words = 256
-X_train = pad_sequences(X_train, maxlen=max_words)
-X_test = pad_sequences(X_test, maxlen=max_words)
-
-# Convert to PyTorch tensors
-X_train = torch.tensor(X_train, dtype=torch.long)
-y_train = torch.tensor(y_train, dtype=torch.float32)
-X_test = torch.tensor(X_test, dtype=torch.long)
-y_test = torch.tensor(y_test, dtype=torch.float32)
-
-# Create DataLoader
-batch_size = 64
-dataset = TensorDataset(X_train, y_train)
-train_size = int(0.8 * len(dataset))
-val_size = len(dataset) - train_size
-train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size)
-"""
-# Define the model
-class SentimentAnalysisModel(nn.Module):
-    def __init__(self, vocab_size, embed_size, lstm_size, max_words):
-        super(SentimentAnalysisModel, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.lstm = nn.LSTM(embed_size, lstm_size, batch_first=True)
-        self.fc = nn.Linear(lstm_size, 1)
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, x):
-        x = self.embedding(x)
-        _, (h_n, _) = self.lstm(x)
-        x = self.fc(h_n[-1])
-        x = self.sigmoid(x)
-        return x
-
-"""
-
-embedding_size = 32
-lstm_size = 100
-model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
 
 # Define loss and optimizer
