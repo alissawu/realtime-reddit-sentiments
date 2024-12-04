@@ -2,12 +2,19 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from attr.validators import max_len
-from jsonschema.benchmarks.contains import middle
+from dask.dataframe import test_dataframe
+from more_itertools.more import padded
+#from attr.validators import max_len
+#from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
 from torchtext.datasets import IMDB
 from torchtext.data import Field,   LabelField, BucketIterator, DataLoader, TensorDataset, random_split
-from torchtext.vocab    import vocab,   GloVe
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab    import build_vocab_from_iterator,   GloVe
+import torchtext.data.dataset as  Dataset
+
+
+
 #from    collections import  Counter,    OrderedDict
 #https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
 
@@ -16,46 +23,7 @@ import requests
 
 from epoch_test import batch_size, train_loader
 
-#params
-max_len =   256
-padding_type    =   'post'
-vocab_size  =   65536
-embedding_dim   =   300
 
-#hypers
-batch_size  =   16
-epoch_count =   15
-lr      =   0.004
-min_lr  =   0.0005
-
-TEXT    =   Field(sequential=True,  tokenize='spacy', lower=True,   batch_first=True,   fix_length=max_len, include_lengths=True)
-LABEL   =   LabelField(dtype=torch.float, batch_first=True)
-train_data, test_data = IMDB.splits(TEXT, LABEL)
-
-TEXT.build_vocab(train_data, vectors=GloVe(name='6B', dim=embedding_dim))
-LABEL.build_vocab(train_data)
-
-pretrained_vectors = TEXT.vocab.vectors
-
-split_1 = 5 / 2
-split_2 = 20 / 17
-split_1_index = int(len(test_data) // split_1)
-split_2_index = int(len(test_data) // split_2) + 1
-
-train_data.examples += test_data.examples[:split_1_index]
-val_data = test_data.examples[split_1_index:split_2_index]
-test_data = test_data.examples[split_2_index:]
-
-from torchtext.data.dataset import  Dataset
-val_data    =   Dataset(val_data,fields={'text':TEXT,'label':LABEL})
-test_data   =   Dataset(test_data,fields={'text':TEXT,'label':LABEL})
-
-
-train_iter, test_iter = BucketIterator.splits(
-    (train_data, test_data),
-    batch_size=batch_size,
-    device=torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-)
 class   cnnToLSTMCustom(nn.Module):
     def __init__(self,vocab_size, embedding_dim, pretrained_vecs,batch_size):
         super(cnnToLSTMCustom,self).__init__()
@@ -77,7 +45,7 @@ class   cnnToLSTMCustom(nn.Module):
         self.midLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
         self.lowLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
 
-        self.weights    =   nn.Parameter(nn.torch([],dtype=torch.float))
+        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
 
         self.fc1    =   nn.Linear(256,16)
         self.dropout = nn.Dropout(0.25)
@@ -122,7 +90,7 @@ class   cnnToLSTMCustom(nn.Module):
 
         even_cells = fused[:, 0::2, :]  # Select even indices
         odd_cells = fused[:, 1::2, :]
-        crunched = torch.cat(even_cells, odd_cells, dim=-1)
+        crunched = torch.cat((even_cells, odd_cells), dim=-1)
         swisher =   nn.SiLU(self.fc1(crunched))
         dropOuts    =   self.dropout(swisher)
         outputs =   F.softmax(self.fc2(dropOuts),dim=1)
@@ -253,53 +221,106 @@ class   cnnToLSTMCustom(nn.Module):
         self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
 """
 
-(X_train, y_train), (X_test, y_test) = IMDB.load_data(num_words=vocab_size)
-print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
-model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+def preprocess_data(data_iter, vocab, max_len):
+    preprocessed = []
+    padding_idx = 0
+    for label, text in data_iter:
+        tokenized_text = token_retriever(text)
+        token_ids = vocab(tokenized_text)[:max_len]
+        padding_needed = max_len - len(token_ids)
+        left_padding = padding_needed // 2
+        right_padding = padding_needed - left_padding  # Handle odd-length padding
+
+        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
+        preprocessed.append((torch.tensor(padded_text, dtype=torch.long),
+                             torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))
 
 
-# Define loss and optimizer
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+if __name__ == "__main__":
+    #params
+    max_len = 256
+    padding_type = 'post'
+    vocab_size = 65536
+    embedding_dim = 300
 
-# Train the model
-num_epochs = 6
-model.train()
-for epoch in range(num_epochs):
-    for inputs, labels in train_loader:
-        outputs = model(inputs).squeeze()
-        loss = criterion(outputs, labels)
+    # hypers
+    batch_size = 16
+    epoch_count = 15
+    learning_rate = 0.004
+    min_lr = 0.0005
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    print(f'Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}')
+    token_retriever = get_tokenizer("spacy")
+    vocab: GloVe = GloVe(name="6B", dim=embedding_dim)
 
-# Validate the model
-model.eval()
-val_loss = 0
-val_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in val_loader:
-        outputs = model(inputs).squeeze()
-        loss = criterion(outputs, labels)
-        val_loss += loss.item()
-        val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-val_loss /= len(val_loader)
-val_accuracy /= len(val_loader)
-print('Validation Loss:', val_loss)
-print('Validation Accuracy:', val_accuracy)
+    train_data = preprocess_data(IMDB(split="train"), vocab)
+    test_data = preprocess_data(IMDB(split="test"), vocab)
 
-# Evaluate the model on the test set
-test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
-test_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in test_loader:
-        outputs = model(inputs).squeeze()
-        test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-test_accuracy /= len(test_loader)
-print('Test Accuracy:', test_accuracy)
+    split_1 = 5 / 2
+    split_2 = 20 / 17
 
-# Save the model
-torch.save(model.state_dict(), 'sentiment_model.pth')
+    split_1_ind = int(len(test_data) // split_1)
+    split_2_ind = int(len(test_data) // split_2) + 1
+
+    train_data += test_data[:split_1_ind]
+    val_data = test_data[split_1_ind:split_2_ind]
+    test_data = test_data[split_2_ind:]
+
+    def yield_token(data_iter):
+        for _, text in data_iter:
+            yield token_retriever(text)
+
+
+    train_iter = IMDB(split="train")
+
+    #(X_train, y_train), (X_test, y_test) = IMDB.load_data(num_words=vocab_size)
+    #print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
+
+    model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+
+    training_loader =   DataLoader(train_data,batch_size=batch_size,shuffle=True,num_workers=4)
+    val_loader  =   DataLoader(val_data,batch_size=batch_size,shuffle=False,num_workers=4)
+    # Define loss and optimizer
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Train the model
+
+    model.train()
+    for epoch in range(epoch_count):
+        for inputs, labels in train_loader:
+            outputs = model(inputs).squeeze()
+            loss = criterion(outputs, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        print(f'Epoch {epoch + 1}/{epoch_count}, Loss: {criterion.item()}')
+
+    # Validate the model
+    model.eval()
+    val_loss = 0
+    val_accuracy = 0
+    with torch.no_grad():
+        for inputs, labels in val_loader:
+            outputs = model(inputs).squeeze()
+            loss = criterion(outputs, labels)
+            val_loss += loss.item()
+            val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+    val_loss /= len(val_loader)
+    val_accuracy /= len(val_loader)
+    print('Validation Loss:', val_loss)
+    print('Validation Accuracy:', val_accuracy)
+
+    # Evaluate the model on the test set
+    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
+    test_accuracy = 0
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            outputs = model(inputs).squeeze()
+            test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+    test_accuracy /= len(test_loader)
+    print('Test Accuracy:', test_accuracy)
+
+    # Save the model
+    torch.save(model.state_dict(), 'sentiment_model.pth')
