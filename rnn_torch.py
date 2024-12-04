@@ -253,6 +253,30 @@ if __name__ == "__main__":
     token_retriever = get_tokenizer("spacy")
     vocab: GloVe = GloVe(name="6B", dim=embedding_dim)
 
+    # Simulate a vocabulary of size `vocab_size`
+    # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
+    # "<unk>" and "<pad>" are added for unknown tokens and padding
+    dataset_vocab = ["<pad>", "<unk>"] + list(glove.stoi.keys())[:vocab_size - 2]
+
+    # Create vocab-to-index mapping
+    word_to_index = {word: idx for idx, word in enumerate(dataset_vocab)}
+
+    # Initialize embedding matrix
+    pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
+
+    # Populate embedding matrix with GloVe vectors
+    for word, idx in word_to_index.items():
+        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
+            pretrained_vectors[idx] = glove[word]
+        elif word == "<pad>":  # Padding vector (optional, all zeros by default)
+            pretrained_vectors[idx] = torch.zeros(embedding_dim)
+        else:  # For OOV words (e.g., "<unk>")
+            pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
+
+    # Create PyTorch Embedding Layer
+    #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
+
+
     train_data = preprocess_data(IMDB(split="train"), vocab)
     test_data = preprocess_data(IMDB(split="test"), vocab)
 
