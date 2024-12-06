@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from dask.dataframe import test_dataframe
-from more_itertools.more import padded
+#from dask.dataframe import test_dataframe
+#from more_itertools.more import padded
 #from attr.validators import max_len
 #from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
@@ -256,7 +256,7 @@ if __name__ == "__main__":
     # Simulate a vocabulary of size `vocab_size`
     # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
     # "<unk>" and "<pad>" are added for unknown tokens and padding
-    dataset_vocab = ["<pad>", "<unk>"] + list(glove.stoi.keys())[:vocab_size - 2]
+    dataset_vocab = ["<pad>", "<unk>"] + list(GloVe.stoi.keys())[:vocab_size - 2]
 
     # Create vocab-to-index mapping
     word_to_index = {word: idx for idx, word in enumerate(dataset_vocab)}
