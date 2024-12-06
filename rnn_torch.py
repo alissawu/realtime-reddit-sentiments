@@ -2,16 +2,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 #from dask.dataframe import test_dataframe
 #from more_itertools.more import padded
 #from attr.validators import max_len
 #from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
 from torchtext.datasets import IMDB
-from torchtext.data import Field,   LabelField, BucketIterator, DataLoader, TensorDataset, random_split
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab    import build_vocab_from_iterator,   GloVe
-import torchtext.data.dataset as  Dataset
+
 
 
 
@@ -21,7 +21,7 @@ import torchtext.data.dataset as  Dataset
 import numpy    as np
 import requests
 
-from epoch_test import batch_size, train_loader
+#from epoch_test import batch_size, train_loader
 
 
 class   cnnToLSTMCustom(nn.Module):
@@ -266,8 +266,8 @@ if __name__ == "__main__":
 
     # Populate embedding matrix with GloVe vectors
     for word, idx in word_to_index.items():
-        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
-            pretrained_vectors[idx] = glove[word]
+        if word in GloVe.stoi:  # Check if word is in GloVe's vocabulary
+            pretrained_vectors[idx] = GloVe[word]
         elif word == "<pad>":  # Padding vector (optional, all zeros by default)
             pretrained_vectors[idx] = torch.zeros(embedding_dim)
         else:  # For OOV words (e.g., "<unk>")
@@ -312,7 +312,7 @@ if __name__ == "__main__":
 
     model.train()
     for epoch in range(epoch_count):
-        for inputs, labels in train_loader:
+        for inputs, labels in training_loader:
             outputs = model(inputs).squeeze()
             loss = criterion(outputs, labels)
 
@@ -337,7 +337,7 @@ if __name__ == "__main__":
     print('Validation Accuracy:', val_accuracy)
 
     # Evaluate the model on the test set
-    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size)
+    test_loader = DataLoader(TensorDataset(test_data), batch_size=batch_size)
     test_accuracy = 0
     with torch.no_grad():
         for inputs, labels in test_loader:
