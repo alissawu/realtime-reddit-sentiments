@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -251,12 +252,25 @@ if __name__ == "__main__":
     min_lr = 0.0005
 
     token_retriever = get_tokenizer("spacy")
-    vocab: GloVe = GloVe(name="6B", dim=embedding_dim)
+    glove = GloVe(name="6B", dim=embedding_dim)
+    print(type(glove.cache))
+    glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+    GloVe_itos = []
+
+    # Read the GloVe file to extract tokens
+    with open(glove_path, "r", encoding="utf-8") as f:
+        for line in f:
+            token = line.split()[0]  # First element is the token
+            GloVe_itos.append(token)
+    #GloVe_itos  =   GloVe.Vocab.get_itos()
+    stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+
 
     # Simulate a vocabulary of size `vocab_size`
     # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
     # "<unk>" and "<pad>" are added for unknown tokens and padding
-    dataset_vocab = ["<pad>", "<unk>"] + list(GloVe.stoi.keys())[:vocab_size - 2]
+    print(dir(glove))
+    dataset_vocab = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
 
     # Create vocab-to-index mapping
     word_to_index = {word: idx for idx, word in enumerate(dataset_vocab)}
@@ -266,8 +280,8 @@ if __name__ == "__main__":
 
     # Populate embedding matrix with GloVe vectors
     for word, idx in word_to_index.items():
-        if word in GloVe.stoi:  # Check if word is in GloVe's vocabulary
-            pretrained_vectors[idx] = GloVe[word]
+        if word in stoi:  # Check if word is in GloVe's vocabulary
+            pretrained_vectors[idx] = stoi[word]
         elif word == "<pad>":  # Padding vector (optional, all zeros by default)
             pretrained_vectors[idx] = torch.zeros(embedding_dim)
         else:  # For OOV words (e.g., "<unk>")
@@ -277,8 +291,8 @@ if __name__ == "__main__":
     #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
 
 
-    train_data = preprocess_data(IMDB(split="train"), vocab)
-    test_data = preprocess_data(IMDB(split="test"), vocab)
+    train_data = preprocess_data(IMDB(split="train"), glove)
+    test_data = preprocess_data(IMDB(split="test"), glove)
 
     split_1 = 5 / 2
     split_2 = 20 / 17

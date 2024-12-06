@@ -1,0 +1,8 @@
+portalocker = 2.0.0
+torchtext	=	0.18.0
+torch		=	2.3.0
+torchdata	=	0.9.0
+numpy		=	1.26.4
+spacy		=	3.8.2
+spacy-model-en_core...	=	3.8.0
+pip	=	24.2
