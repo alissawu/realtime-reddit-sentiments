@@ -222,21 +222,58 @@ class   cnnToLSTMCustom(nn.Module):
         self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
 """
 
-
-def preprocess_data(data_iter, vocab, max_len):
+"""
+def preprocess_data(data_iter, vocab, max_tokens):
     preprocessed = []
     padding_idx = 0
+    print(dir(data_iter))
+    print(type(data_iter))
     for label, text in data_iter:
+        print(label)
         tokenized_text = token_retriever(text)
         token_ids = vocab(tokenized_text)[:max_len]
-        padding_needed = max_len - len(token_ids)
+        padding_needed = max_tokens - len(token_ids)
         left_padding = padding_needed // 2
         right_padding = padding_needed - left_padding  # Handle odd-length padding
 
         padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
         preprocessed.append((torch.tensor(padded_text, dtype=torch.long),
-                             torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))
+                             torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
 
+
+def preprocess_data(data_iter, vocab, max_tokens):
+    preprocessed = []
+    padding_idx = 0
+    print(dir(data_iter))
+    print(type(data_iter))
+    data_pipe = data_iter.sharding_filter()
+    splits = data_pipe.random_split(weights={"train": 0.8, "val": 0.1, "test": 0.1},total_length=50000, seed=141)
+    train_pipe = splits[0]
+    val_pipe = splits[1]
+    test_pipe = splits[2]
+    for i, (label, text) in enumerate(train_pipe):
+        print(f"Processing label: {label}")
+
+        # Tokenize the text
+        tokenized_text = token_retriever(text)
+
+        # Convert tokens to IDs and truncate to max length
+        token_ids = vocab(tokenized_text)[:max_tokens]
+
+        # Compute padding
+        padding_needed = max_tokens - len(token_ids)
+        left_padding = padding_needed // 2
+        right_padding = padding_needed - left_padding  # Handle odd-length padding
+
+        # Apply padding
+        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
+
+        # Convert label to tensor
+        label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
+
+        # Add to preprocessed list
+        preprocessed.append((torch.tensor(padded_text, dtype=torch.long), label_tensor))
+    return preprocessed
 
 if __name__ == "__main__":
     #params
@@ -290,9 +327,12 @@ if __name__ == "__main__":
     # Create PyTorch Embedding Layer
     #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
 
-
-    train_data = preprocess_data(IMDB(split="train"), glove)
-    test_data = preprocess_data(IMDB(split="test"), glove)
+    inst_train  =   DataLoader(IMDB(split="train"), drop_last=True)
+    inst_test = IMDB(split="test")
+    print(str(type(inst_train)) + ".trainer    |.    " + str(dir(inst_train)))
+    print(str(type(inst_test)) + ".    |.    " + str(dir(inst_test)))
+    train_data = preprocess_data(inst_train, glove,max_len)
+    test_data = preprocess_data(inst_test, glove,max_len)
 
     split_1 = 5 / 2
     split_2 = 20 / 17
