@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
@@ -11,12 +12,12 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 #from torch.utils.tensorboard    import  SummaryWriter
 from torchtext.datasets import IMDB
 from torchtext.data.utils import get_tokenizer
-from torchtext.vocab    import build_vocab_from_iterator,   GloVe
+from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
 
 
 
 
-#from    collections import  Counter,    OrderedDict
+from    collections import  Counter,    OrderedDict
 #https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
 
 import numpy    as np
@@ -246,12 +247,12 @@ def preprocess_data(data_iter, vocab, max_tokens):
     padding_idx = 0
     print(dir(data_iter))
     print(type(data_iter))
-    data_pipe = data_iter.sharding_filter()
-    splits = data_pipe.random_split(weights={"train": 0.8, "val": 0.1, "test": 0.1},total_length=50000, seed=141)
-    train_pipe = splits[0]
-    val_pipe = splits[1]
-    test_pipe = splits[2]
-    for i, (label, text) in enumerate(train_pipe):
+    #data_pipe = data_iter.sharding_filter
+    #splits = data_pipe.random_split(weights={"train": 0.8, "val": 0.1, "test": 0.1},total_length=50000, seed=141)
+    #train_pipe = splits[0]
+    #val_pipe = splits[1]
+    #test_pipe = splits[2]
+    for i, (label, text) in enumerate(data_iter):
         print(f"Processing label: {label}")
 
         # Tokenize the text
@@ -327,9 +328,47 @@ if __name__ == "__main__":
     # Create PyTorch Embedding Layer
     #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
 
-    inst_train  =   DataLoader(IMDB(split="train"), drop_last=True)
+    inst_train  =   IMDB(split="train")
+    inst_train =    inst_train.sharding_filter
+    dLoad_train = DataLoader(inst_train, batch_size=16, drop_last=True)
     inst_test = IMDB(split="test")
-    print(str(type(inst_train)) + ".trainer    |.    " + str(dir(inst_train)))
+
+    class   IMDBDataset(Dataset):
+        def __init__(self, dataset, tokenizer,vocab):
+            self.dataset = dataset
+            self.tokenizer = tokenizer
+            self.vocab = vocab
+
+        def __len__(self):
+            return len(self.dataset)
+        def __getitem__(self, idx):
+            label,text  =   self.dataset[idx]
+            label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
+            text_tokens = self.tokenizer.tokenize(text)
+            text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
+            return  text_tensor, label_tensor
+    imdbDataset =   IMDBDataset(dLoad_train, token_retriever, stoi)
+    def collate_batch(batch):
+        text_list, label_list = [],[]
+        for text, label in batch:
+            text_list.append(text)
+            label_list.append(label)
+        text_padded =   pad_sequence(text_list, batch_first=True,   padding_value=stoi['<pad>'])
+        labels  =   torch.tensor(label_list, dtype=torch.float)
+        return text_padded, labels
+    dLoader =   DataLoader(imdbDataset, batch_size=batch_size, collate_fn=collate_batch)
+
+    all_texts   =   []
+    all_labels = []
+
+    for text_batch, label_batch in dLoader:
+        all_texts.append(text_batch)
+        all_labels.append(label_batch)
+    all_texts_tensor = torch.cat(all_texts,dim=0)
+    all_labels_tensor = torch.cat(all_labels,dim=0)
+
+
+    print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
     print(str(type(inst_test)) + ".    |.    " + str(dir(inst_test)))
     train_data = preprocess_data(inst_train, glove,max_len)
     test_data = preprocess_data(inst_test, glove,max_len)
