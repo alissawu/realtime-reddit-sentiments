@@ -6,3 +6,53 @@ numpy		=	1.26.4
 spacy		=	3.8.2
 spacy-model-en_core...	=	3.8.0
 pip	=	24.2
+
+
+
+
+def preprocess_data(data_pipe, vocab, max_tokens, batch_size):
+    padding_idx = 0
+
+    # Debugging: Print DataPipe methods and attributes
+    print(f"DataPipe Type: {type(data_pipe)}")
+    print(f"DataPipe Methods: {dir(data_pipe)}")
+
+    # Function to preprocess each item
+    def preprocess_item(item):
+        label, text = item
+        tokenized_text = token_retriever(text)
+        token_ids = vocab(tokenized_text)[:max_tokens]
+
+        # Compute padding
+        padding_needed = max_tokens - len(token_ids)
+        left_padding = padding_needed // 2
+        right_padding = padding_needed - left_padding
+        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
+
+        # Convert label
+        label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
+        return torch.tensor(padded_text, dtype=torch.long), label_tensor
+
+    # Apply `map` to preprocess the entire DataPipe
+    data_pipe = data_pipe.map(preprocess_item)
+
+    # Use DataLoader to handle batching and shuffling
+    data_loader = DataLoader(
+        data_pipe,
+        batch_size=batch_size,
+        shuffle=True,  # Shuffle the dataset
+        collate_fn=lambda x: list(zip(*x)),  # Handle batch collation
+    )
+
+    # Visualize the first batch
+    train_features, train_labels = next(iter(data_loader))
+    train_features = torch.stack(train_features)  # Convert list to tensor
+    train_labels = torch.tensor(train_labels)    # Convert list to tensor
+
+    print(f"Feature batch shape: {train_features.size()}")
+    print(f"Labels batch shape: {train_labels.size()}")
+    plt.imshow(train_features[0].view(1, -1), cmap="gray", aspect="auto")
+    plt.title(f"Label: {'Positive' if train_labels[0].item() == 1.0 else 'Negative'}")
+    plt.show()
+
+    return data_loader
