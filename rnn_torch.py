@@ -52,7 +52,47 @@ class   cnnToLSTMCustom(nn.Module):
         self.fc1    =   nn.Linear(256,16)
         self.dropout = nn.Dropout(0.25)
         self.fc2 = nn.Linear(16,2)
+    def forward(self, x):
+        x = self.embed(x).permute(0, 2, 1)
 
+        # CNN Layers
+        topk2 = self.kern2s1(x)
+        topk4 = self.kern4s2(x)
+        midk3 = self.kern3s3p1(x)
+        midk6 = self.kern6s3p1(x)
+        lowk5 = self.kern5s3(x)
+
+        # LSTM Outputs
+        upp_outputs, _ = self.uppLSTM(topk2.transpose(1, 2) + topk4.transpose(1, 2))
+        mid_outputs, _ = self.midLSTM(midk3.transpose(1, 2) + midk6.transpose(1, 2))
+        low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
+
+        # Apply PLA
+        def apply_pla(features):
+            # Compute covariance matrix
+            cov_matrix = features.T @ features
+            eigvals, eigvecs = torch.linalg.eigh(cov_matrix)
+
+            # Sort eigenvectors by eigenvalues in descending order
+            sorted_indices = torch.argsort(eigvals, descending=True)
+            top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
+
+            # Project features onto top principal components
+            return features @ top_k_eigvecs
+
+        upp_features = apply_pla(upp_outputs.mean(dim=1))
+        mid_features = apply_pla(mid_outputs.mean(dim=1))
+        low_features = apply_pla(low_outputs.mean(dim=1))
+
+        # Combine PLA-reduced features (simple concatenation or addition)
+        fused = upp_features + mid_features + low_features  # Replace learned weights with direct combination
+
+        # Fully Connected Layers
+        swisher = F.silu(self.fc1(fused.mean(dim=1)))
+        dropout = self.dropout(swisher)
+        outputs = F.softmax(self.fc2(dropout), dim=1)
+
+        return outputs"""
     def forward(self,x):
         x   =   self.embed(x).permute(0,2,1)
         embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
@@ -96,8 +136,7 @@ class   cnnToLSTMCustom(nn.Module):
         swisher =   nn.SiLU(self.fc1(crunched))
         dropOuts    =   self.dropout(swisher)
         outputs =   F.softmax(self.fc2(dropOuts),dim=1)
-        return outputs
-
+        return outputs"""
 
 
 
@@ -319,7 +358,9 @@ if __name__ == "__main__":
     # Populate embedding matrix with GloVe vectors
     for word, idx in word_to_index.items():
         if word in stoi:  # Check if word is in GloVe's vocabulary
-            pretrained_vectors[idx] = stoi[word]
+            #pretrained_vectors[idx] = stoi[word]
+
+            pretrained_vectors[idx] = torch.tensor(stoi[word], dtype=torch.float)
         elif word == "<pad>":  # Padding vector (optional, all zeros by default)
             pretrained_vectors[idx] = torch.zeros(embedding_dim)
         else:  # For OOV words (e.g., "<unk>")
@@ -327,10 +368,14 @@ if __name__ == "__main__":
 
     # Create PyTorch Embedding Layer
     #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
-
+    from collections import Counter
     inst_train  =   IMDB(split="train")
-    inst_train =    inst_train.sharding_filter
-    dLoad_train = DataLoader(inst_train, batch_size=16, drop_last=True)
+    inst_train =    inst_train####""".sharding_filter"""
+    """    counter = Counter()
+    for label, text in inst_train:
+        tokens = token_retriever(text)
+        counter.update(tokens)"""
+    dLoad_train = DataLoader(inst_train, batch_size=16, drop_last=True,shuffle=True)
     inst_test = IMDB(split="test")
 
     class   IMDBDataset(Dataset):
@@ -343,11 +388,12 @@ if __name__ == "__main__":
             return len(self.dataset)
         def __getitem__(self, idx):
             label,text  =   self.dataset[idx]
+
             label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
-            text_tokens = self.tokenizer.tokenize(text)
+            text_tokens = self.tokenizer(text)
             text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
             return  text_tensor, label_tensor
-    imdbDataset =   IMDBDataset(dLoad_train, token_retriever, stoi)
+    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
     def collate_batch(batch):
         text_list, label_list = [],[]
         for text, label in batch:
