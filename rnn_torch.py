@@ -389,13 +389,13 @@ if __name__ == "__main__":
 
         def __len__(self):
             return len(self.dataset)
-        def __getitem__(self, idx):
+        """def __getitem__(self, idx):
             label,text  =   self.dataset[idx]
 
             label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
             text_tokens = self.tokenizer(text)
             text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
-            return  text_tensor, label_tensor
+            return  text_tensor, label_tensor"""
     imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
     def collate_batch(batch):
         text_list, label_list = [],[]
@@ -406,7 +406,7 @@ if __name__ == "__main__":
         labels  =   torch.tensor(label_list, dtype=torch.float)
         return text_padded, labels
     dLoader =   DataLoader(imdbDataset, batch_size=batch_size, collate_fn=collate_batch)
-
+#this one
     all_texts   =   []
     all_labels = []
 
