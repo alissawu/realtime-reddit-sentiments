@@ -1,4 +1,4 @@
-portalocker = 2.0.0
+portalocker = 3.0.0
 torchtext	=	0.18.0
 torch		=	2.3.0
 torchdata	=	0.9.0
