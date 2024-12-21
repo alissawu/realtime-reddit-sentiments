@@ -92,7 +92,9 @@ class   cnnToLSTMCustom(nn.Module):
         dropout = self.dropout(swisher)
         outputs = F.softmax(self.fc2(dropout), dim=1)
 
-        return outputs"""
+        return outputs
+
+        """
     def forward(self,x):
         x   =   self.embed(x).permute(0,2,1)
         embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
@@ -141,7 +143,7 @@ class   cnnToLSTMCustom(nn.Module):
 
 
 
-    def kern2ImagTransformer(self,input_tensor):
+    def kern2ImagTransformer(input_tensor):
         # Original tensor of shape (N, 300, 255)
         N, seq_len, num_filters = 4, 300, 255  # Example sizes
         output_tensor=input_tensor.to(dtype=torch.complex64)
@@ -166,6 +168,7 @@ class   cnnToLSTMCustom(nn.Module):
             output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
         print(output_tensor.shape)  # Should be (N, 300, 512)
+        return output_tensor
 
     def kern4ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 127)
@@ -182,7 +185,7 @@ class   cnnToLSTMCustom(nn.Module):
             # Assign the input values to the imaginary part of the output tensor
             output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
         """
-
+        return output_tensor
     def kern3Transformer(self,input_tensor):
         # Original tensor of shape (N, 300, 86)
         N, embedding_dim, num_filters = 16, 300, 86  # Example sizes
@@ -197,7 +200,7 @@ class   cnnToLSTMCustom(nn.Module):
 
         #values for the outlier 85 filter
         output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
-
+        return output_tensor
     def kern6ImagTransformer(self,input_tensor):
 
         # Original tensor of shape (N, 300, 85)
@@ -215,7 +218,7 @@ class   cnnToLSTMCustom(nn.Module):
 
         # Outlier filter 84
         output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
-
+        return output_tensor
     def kern5ImagTransformer(self,input_tensor):
         """
         Transform input tensor of shape (N, 300, 86) into (N, 300, 512)
@@ -386,7 +389,7 @@ if __name__ == "__main__":
 
         def __len__(self):
             return len(self.dataset)
-        def __getitem__(self, idx):
+        #def __getitem__(self, idx):
             label,text  =   self.dataset[idx]
 
             label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
