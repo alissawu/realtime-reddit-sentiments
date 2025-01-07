@@ -331,7 +331,20 @@ if __name__ == "__main__":
     learning_rate = 0.004
     min_lr = 0.0005
 
-    token_retriever = get_tokenizer("spacy")
+    token_retriever = get_tokenizer("basic_english")
+    def yield_tokens(data_iter):
+        for label, text in data_iter:
+            yield token_retriever(text)
+    train_iter  =   IMDB(root=".data",split="train")
+    vocab = build_vocab_from_iterator(yield_tokens(train_iter)[1],specials=["<unk>"])
+    vocab.set_default_index(vocab['<unk>'])
+
+    #helper to process text into tensor
+    def text_pipeline(text):
+        return  torch.tensor(vocab(tokeniszer(text)), dtype=torch.float)
+    def label_pipeline(label):
+        return torch.tensor(int(label)-1, dtype=torch.float)
+
     glove = GloVe(name="6B", dim=embedding_dim)
     print(type(glove.cache))
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path

@@ -10,11 +10,11 @@ tokenizer = get_tokenizer("basic_english")
 # Function to yield tokens from the dataset
 def yield_tokens(data_iter):
     for label, text in data_iter:
-        yield tokenizer(text)
+        yield label, tokenizer(text)
 
 # Load train split to build vocabulary
 train_iter = IMDB(root=".data", split="train")
-vocab = build_vocab_from_iterator(yield_tokens(train_iter), specials=["<unk>"])
+vocab = build_vocab_from_iterator(yield_tokens(train_iter)[1], specials=["<unk>"])
 vocab.set_default_index(vocab["<unk>"])
 
 # Helper function to process text to tensor
@@ -24,7 +24,7 @@ def text_pipeline(text):
 # Helper function to process labels to tensor
 def label_pipeline(label):
     return torch.tensor(int(label) - 1, dtype=torch.int64)  # Convert to 0 and 1 for binary classification
-
+#RETURN HERE
 # Load train and test data with transformations
 def process_dataset(split):
     raw_iter = IMDB(root=".data", split=split)
