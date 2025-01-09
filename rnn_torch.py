@@ -364,7 +364,7 @@ if __name__ == "__main__":
     iter1_wrapped = TupleDataset(iter1)
     iter2_wrapped = TupleDataset(iter2)
 
-    # Combine them into one dataset
+    # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
     combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
     (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset)
     vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>"])
