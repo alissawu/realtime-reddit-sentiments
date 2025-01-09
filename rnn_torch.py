@@ -347,15 +347,6 @@ if __name__ == "__main__":
     def yield_tokens(data_iter):
         for label, text in data_iter:
             yield token_retriever(text)
-
-    train_iter  =   IMDB(root=".data",split="train")
-
-
-
-
-    #helper to process text into tensor
-
-
     # Custom iterwrapper
     class TupleDataset(Dataset):
         def __init__(self, data):
