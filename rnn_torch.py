@@ -251,7 +251,7 @@ class   cnnToLSTMCustom(nn.Module):
 
 
 
-
+#cutesry
 """class   initialSentModel(nn.Module):
     def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
         super(initialSentModel,    self).__init__()
@@ -285,10 +285,7 @@ def preprocess_data(data_iter, vocab, max_tokens):
 
 
 def process_dataset(combined_dataset=Dataset):
-
-    separated_data =   [(label, text) for label, text in combined_dataset]
-
-    # Compute sizes for train and initial test splits
+    #comp sizes for train and initial test splits
     total_size = 50000
     train_size = total_size * 0.7
     val_size    = total_size * 0.2
@@ -299,14 +296,9 @@ def process_dataset(combined_dataset=Dataset):
         for label, text in data_iter:
             yield tokenizer(text)
 
-    # Load train split to build vocabulary
-
-
-    # Helper function to process text to tensor
     def text_pipeline(text):
         return torch.tensor(vocab(tokenizer(text)), dtype=torch.int64)
 
-    # Helper function to process labels to tensor
     def label_pipeline(label):
         if isinstance(label, str):
             if label == "pos":
@@ -319,8 +311,6 @@ def process_dataset(combined_dataset=Dataset):
             return torch.tensor(int(label) - 1, dtype=torch.float)
         else:
             raise ValueError(f"Unsupported label type: {label}")
-        # Load train and test data with transformations
-#FROM HERE STARTTT
     def pipeline_driver(raw_data_split):
         return  [(label_pipeline(label),text_pipeline(text))
                  for label, text in raw_data_split
@@ -476,33 +466,16 @@ if __name__ == "__main__":
 
     print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
     print(str(type(inst_test)) + ".    |.    " + str(dir(inst_test)))
-    train_data = preprocess_data(inst_train, glove,max_len)
-    test_data = preprocess_data(inst_test, glove,max_len)
 
-    split_1 = 5 / 2
-    split_2 = 20 / 17
-
-    split_1_ind = int(len(test_data) // split_1)
-    split_2_ind = int(len(test_data) // split_2) + 1
-
-    train_data += test_data[:split_1_ind]
-    val_data = test_data[split_1_ind:split_2_ind]
-    test_data = test_data[split_2_ind:]
-
-    def yield_token(data_iter):
+    """def yield_token(data_iter):
         for _, text in data_iter:
-            yield token_retriever(text)
+            yield token_retriever(text)"""
 
-
-    train_iter = IMDB(split="train")
-
-    #(X_train, y_train), (X_test, y_test) = IMDB.load_data(num_words=vocab_size)
-    #print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
     model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
-    training_loader =   DataLoader(train_data,batch_size=batch_size,shuffle=True,num_workers=4)
-    val_loader  =   DataLoader(val_data,batch_size=batch_size,shuffle=False,num_workers=4)
+    training_loader =   DataLoader(train_dSet,batch_size=batch_size,shuffle=True,num_workers=4)
+    val_loader  =   DataLoader(val_dSet,batch_size=batch_size,shuffle=False,num_workers=4)
     # Define loss and optimizer
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
