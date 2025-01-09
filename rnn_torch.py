@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
 from torchtext.datasets import IMDB
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
-
+from torch.utils.data import ConcatDataset
 
 
 
@@ -284,39 +284,61 @@ def preprocess_data(data_iter, vocab, max_tokens):
                              torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
 
 
-def preprocess_data(data_iter, vocab, max_tokens):
-    preprocessed = []
-    padding_idx = 0
-    print(dir(data_iter))
-    print(type(data_iter))
-    #data_pipe = data_iter.sharding_filter
-    #splits = data_pipe.random_split(weights={"train": 0.8, "val": 0.1, "test": 0.1},total_length=50000, seed=141)
-    #train_pipe = splits[0]
-    #val_pipe = splits[1]
-    #test_pipe = splits[2]
-    for i, (label, text) in enumerate(data_iter):
-        print(f"Processing label: {label}")
+def process_dataset(combined_dataset=Dataset):
 
-        # Tokenize the text
-        tokenized_text = token_retriever(text)
+    separated_data =   [(label, text) for label, text in combined_dataset]
 
-        # Convert tokens to IDs and truncate to max length
-        token_ids = vocab(tokenized_text)[:max_tokens]
+    # Compute sizes for train and initial test splits
+    total_size = 50000
+    train_size = total_size * 0.7
+    val_size    = total_size * 0.2
+    test_size = total_size * 0.1
+    tokenizer = get_tokenizer("basic_english")
 
-        # Compute padding
-        padding_needed = max_tokens - len(token_ids)
-        left_padding = padding_needed // 2
-        right_padding = padding_needed - left_padding  # Handle odd-length padding
+    def yield_tokens(data_iter):
+        for label, text in data_iter:
+            yield tokenizer(text)
 
-        # Apply padding
-        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
+    # Load train split to build vocabulary
 
-        # Convert label to tensor
-        label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
 
-        # Add to preprocessed list
-        preprocessed.append((torch.tensor(padded_text, dtype=torch.long), label_tensor))
-    return preprocessed
+    # Helper function to process text to tensor
+    def text_pipeline(text):
+        return torch.tensor(vocab(tokenizer(text)), dtype=torch.int64)
+
+    # Helper function to process labels to tensor
+    def label_pipeline(label):
+        if isinstance(label, str):
+            if label == "pos":
+                return torch.tensor(1, dtype=torch.float)
+            elif label == "neg":
+                return torch.tensor(0, dtype=torch.float)
+            else:
+                raise ValueError(f"Unexpected label: {label}")
+        elif isinstance(label, int) or label.isdigit():
+            return torch.tensor(int(label) - 1, dtype=torch.float)
+        else:
+            raise ValueError(f"Unsupported label type: {label}")
+        # Load train and test data with transformations
+#FROM HERE STARTTT
+    def pipeline_driver(raw_data_split):
+        return  [(label_pipeline(label),text_pipeline(text))
+                 for label, text in raw_data_split
+        ]
+
+    # Create train and test datasets with random split
+    train_dSet, test_dSet,val_dSet = random_split(combined_dataset, [train_size,val_size, test_size])
+    #train_size =   25000+25000//split_1 or 50000*0.7
+    #test_size   =   25000(1-1//split_1) or 50000*0.1
+    #val_size   =   25000(8/10-2/5) or 50000*0.2
+    # Split the test_data further into train_data, val_data, and test
+
+    # Preprocess all datasets using label and text pipelines
+    train_data  = pipeline_driver(train_dSet)
+    val_data    = pipeline_driver(test_dSet)
+    test_data   = pipeline_driver(val_dSet)
+
+    return (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)
 
 if __name__ == "__main__":
     #params
@@ -335,32 +357,38 @@ if __name__ == "__main__":
     def yield_tokens(data_iter):
         for label, text in data_iter:
             yield token_retriever(text)
+
     train_iter  =   IMDB(root=".data",split="train")
-    vocab = build_vocab_from_iterator(yield_tokens(train_iter),specials=["<unk>"])
-    vocab.set_default_index(vocab['<unk>'])
+
+
+
 
     #helper to process text into tensor
-    def text_pipeline(text):
-        return  torch.tensor(vocab(token_retriever(text)), dtype=torch.float)
 
 
-    def label_pipeline(label):
-        if isinstance(label, str):
-            if label == "pos":
-                return torch.tensor(1, dtype=torch.float)
-            elif label == "neg":
-                return torch.tensor(0, dtype=torch.float)
-            else:
-                raise ValueError(f"Unexpected label: {label}")
-        elif isinstance(label, int) or label.isdigit():
-            return torch.tensor(int(label) - 1, dtype=torch.float)
-        else:
-            raise ValueError(f"Unsupported label type: {label}")
-    IMDBset = IMDB(root=".data",split=split)
-    def process_data(data, split):
+    # Custom iterwrapper
+    class TupleDataset(Dataset):
+        def __init__(self, data):
+            self.data = list(data)  # Convert iterable to a list for indexing
 
-    train_data = process_dataset("train")
-    test_data = process_dataset("test")
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+    # Convert the datasets into PyTorch Dataset objects
+    iter1 = IMDB(root=".data", split='train')
+    iter2 = IMDB(root=".data", split='test')
+    iter1_wrapped = TupleDataset(iter1)
+    iter2_wrapped = TupleDataset(iter2)
+
+    # Combine them into one dataset
+    combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
+    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset)
+    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>"])
+    vocab.set_default_index(vocab["<unk>"])
+#finish vocab tomorrow 1/9
     glove = GloVe(name="6B", dim=embedding_dim)
     print(type(glove.cache))
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
