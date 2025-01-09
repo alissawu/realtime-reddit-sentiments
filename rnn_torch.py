@@ -336,15 +336,31 @@ if __name__ == "__main__":
         for label, text in data_iter:
             yield token_retriever(text)
     train_iter  =   IMDB(root=".data",split="train")
-    vocab = build_vocab_from_iterator(yield_tokens(train_iter)[1],specials=["<unk>"])
+    vocab = build_vocab_from_iterator(yield_tokens(train_iter),specials=["<unk>"])
     vocab.set_default_index(vocab['<unk>'])
 
     #helper to process text into tensor
     def text_pipeline(text):
-        return  torch.tensor(vocab(tokeniszer(text)), dtype=torch.float)
-    def label_pipeline(label):
-        return torch.tensor(int(label)-1, dtype=torch.float)
+        return  torch.tensor(vocab(token_retriever(text)), dtype=torch.float)
 
+
+    def label_pipeline(label):
+        if isinstance(label, str):
+            if label == "pos":
+                return torch.tensor(1, dtype=torch.float)
+            elif label == "neg":
+                return torch.tensor(0, dtype=torch.float)
+            else:
+                raise ValueError(f"Unexpected label: {label}")
+        elif isinstance(label, int) or label.isdigit():
+            return torch.tensor(int(label) - 1, dtype=torch.float)
+        else:
+            raise ValueError(f"Unsupported label type: {label}")
+    IMDBset = IMDB(root=".data",split=split)
+    def process_data(data, split):
+
+    train_data = process_dataset("train")
+    test_data = process_dataset("test")
     glove = GloVe(name="6B", dim=embedding_dim)
     print(type(glove.cache))
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
