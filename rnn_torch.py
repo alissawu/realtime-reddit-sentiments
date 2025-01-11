@@ -367,7 +367,7 @@ if __name__ == "__main__":
     # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
     combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
     (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset)
-    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>"])
+    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>","<pad>"])
     vocab.set_default_index(vocab["<unk>"])
 #finish vocab tomorrow 1/9
     glove = GloVe(name="6B", dim=embedding_dim)
@@ -375,50 +375,48 @@ if __name__ == "__main__":
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
     GloVe_itos = []
 
-    # Read the GloVe file to extract tokens
+    """"# Read the GloVe file to extract tokens
     with open(glove_path, "r", encoding="utf-8") as f:
         for line in f:
             token = line.split()[0]  # First element is the token
             GloVe_itos.append(token)
     #GloVe_itos  =   GloVe.Vocab.get_itos()
-    stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+    """
+    #stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
 
 
     # Simulate a vocabulary of size `vocab_size`
     # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
     # "<unk>" and "<pad>" are added for unknown tokens and padding
     print(dir(glove))
-    dataset_vocab = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
+    pad_idx =   vocab["<pad>"]
+    #vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
 
     # Create vocab-to-index mapping
-    word_to_index = {word: idx for idx, word in enumerate(dataset_vocab)}
+    #word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
 
     # Initialize embedding matrix
     pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
 
     # Populate embedding matrix with GloVe vectors
-    for word, idx in word_to_index.items():
-        if word in stoi:  # Check if word is in GloVe's vocabulary
+    for word, idx in vocab.get_stoi.items():
+        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
             #pretrained_vectors[idx] = stoi[word]
 
-            pretrained_vectors[idx] = torch.tensor(stoi[word], dtype=torch.float)
+            pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float)
         elif word == "<pad>":  # Padding vector (optional, all zeros by default)
             pretrained_vectors[idx] = torch.zeros(embedding_dim)
         else:  # For OOV words (e.g., "<unk>")
             pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
 
     # Create PyTorch Embedding Layer
-    #embedding_layer = Embedding.from_pretrained(pretrained_vctors, freeze=False)  # freeze=False to fine-tune
-    from collections import Counter
-    inst_train  =   IMDB(split="train")
-    inst_train =    inst_train####""".sharding_filter"""
-    """    counter = Counter()
-    for label, text in inst_train:
-        tokens = token_retriever(text)
-        counter.update(tokens)"""
-    dLoad_train = DataLoader(inst_train, batch_size=16, drop_last=True,shuffle=True)
-    inst_test = IMDB(split="test")
+    embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
 
+
+    dLoad_train = DataLoader(train_dSet, batch_size=16, drop_last=True,shuffle=True)
+    dLoad_test = DataLoader(test_dSet, batch_size=16, drop_last=True,shuffle=True)
+    inst_test = IMDB(split="test")
+    """
     class   IMDBDataset(Dataset):
         def __init__(self, dataset, tokenizer,vocab):
             self.dataset = dataset
@@ -427,15 +425,21 @@ if __name__ == "__main__":
 
         def __len__(self):
             return len(self.dataset)
-        """def __getitem__(self, idx):
+        def __getitem__(self, idx):
             label,text  =   self.dataset[idx]
 
             label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
             text_tokens = self.tokenizer(text)
             text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
-            return  text_tensor, label_tensor"""
-    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
+            return  text_tensor, label_tensor
+    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)"""
     def collate_batch(batch):
+        labels,texts = zip(*batch)
+        labels  =   torch.stack(labels)
+        text_lengths = [len(text) for text in texts]
+        texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
+        return  labels, texts, text_lengths
+
         text_list, label_list = [],[]
         for text, label in batch:
             text_list.append(text)
