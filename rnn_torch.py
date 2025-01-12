@@ -27,7 +27,7 @@ import requests
 
 
 class   cnnToLSTMCustom(nn.Module):
-    def __init__(self,vocab_size, embedding_dim, pretrained_vecs,batch_size):
+    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs:  int ,batch_size:    int ):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
@@ -94,8 +94,8 @@ class   cnnToLSTMCustom(nn.Module):
 
         return outputs
 
-        """
-    def forward(self,x):
+        # noinspection PyUnreachableCode
+        print("""    def forward(self,x):
         x   =   self.embed(x).permute(0,2,1)
         embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
 
@@ -138,7 +138,7 @@ class   cnnToLSTMCustom(nn.Module):
         swisher =   nn.SiLU(self.fc1(crunched))
         dropOuts    =   self.dropout(swisher)
         outputs =   F.softmax(self.fc2(dropOuts),dim=1)
-        return outputs"""
+        return outputs""")
 
 
 
@@ -284,19 +284,19 @@ def preprocess_data(data_iter, vocab, max_tokens):
                              torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
 
 
-def process_dataset(combined_dataset=Dataset):
+def process_dataset(combined_dataset=Dataset,vocab):
     #comp sizes for train and initial test splits
     total_size = 50000
-    train_size = total_size * 0.7
-    val_size    = total_size * 0.2
-    test_size = total_size * 0.1
+    train_size = int(total_size * 0.7)
+    val_size    = int(total_size * 0.2)
+    test_size = int(total_size * 0.1)
     tokenizer = get_tokenizer("basic_english")
 
     def yield_tokens(data_iter):
         for label, text in data_iter:
             yield tokenizer(text)
 
-    def text_pipeline(text):
+    def text_pipeline(text,vocab):
         return torch.tensor(vocab(tokenizer(text)), dtype=torch.int64)
 
     def label_pipeline(label):
@@ -366,7 +366,7 @@ if __name__ == "__main__":
 
     # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
     combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
-    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset)
+    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset,)
     vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>","<pad>"])
     vocab.set_default_index(vocab["<unk>"])
 #finish vocab tomorrow 1/9
@@ -412,10 +412,18 @@ if __name__ == "__main__":
     # Create PyTorch Embedding Layer
     embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
 
+    def collate_batch(batch):
+        #after separately pipelining, zip
+        labels,texts = zip(*batch)
+        labels  =   torch.stack(labels)
+        text_lengths = [len(text) for text in texts]
+        texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
+        return  labels, texts, text_lengths
 
-    dLoad_train = DataLoader(train_dSet, batch_size=16, drop_last=True,shuffle=True)
-    dLoad_test = DataLoader(test_dSet, batch_size=16, drop_last=True,shuffle=True)
-    inst_test = IMDB(split="test")
+    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
+    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
+    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
+    #inst_test = IMDB(split="test")
     """
     class   IMDBDataset(Dataset):
         def __init__(self, dataset, tokenizer,vocab):
@@ -432,13 +440,8 @@ if __name__ == "__main__":
             text_tokens = self.tokenizer(text)
             text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
             return  text_tensor, label_tensor
-    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)"""
-    def collate_batch(batch):
-        labels,texts = zip(*batch)
-        labels  =   torch.stack(labels)
-        text_lengths = [len(text) for text in texts]
-        texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
-        return  labels, texts, text_lengths
+    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
+    
 
         text_list, label_list = [],[]
         for text, label in batch:
@@ -446,13 +449,12 @@ if __name__ == "__main__":
             label_list.append(label)
         text_padded =   pad_sequence(text_list, batch_first=True,   padding_value=stoi['<pad>'])
         labels  =   torch.tensor(label_list, dtype=torch.float)
-        return text_padded, labels
-    dLoader =   DataLoader(imdbDataset, batch_size=batch_size, collate_fn=collate_batch)
+        return text_padded, labels"""
 #this one
     all_texts   =   []
     all_labels = []
 
-    for text_batch, label_batch in dLoader:
+    for text_batch, label_batch in dLoad_train:
         all_texts.append(text_batch)
         all_labels.append(label_batch)
     all_texts_tensor = torch.cat(all_texts,dim=0)
@@ -460,7 +462,7 @@ if __name__ == "__main__":
 
 
     print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
-    print(str(type(inst_test)) + ".    |.    " + str(dir(inst_test)))
+    print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
 
     """def yield_token(data_iter):
         for _, text in data_iter:
@@ -469,8 +471,6 @@ if __name__ == "__main__":
 
     model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
-    training_loader =   DataLoader(train_dSet,batch_size=batch_size,shuffle=True,num_workers=4)
-    val_loader  =   DataLoader(val_dSet,batch_size=batch_size,shuffle=False,num_workers=4)
     # Define loss and optimizer
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -479,7 +479,7 @@ if __name__ == "__main__":
 
     model.train()
     for epoch in range(epoch_count):
-        for inputs, labels in training_loader:
+        for inputs, labels in dLoad_train:
             outputs = model(inputs).squeeze()
             loss = criterion(outputs, labels)
 
@@ -493,24 +493,23 @@ if __name__ == "__main__":
     val_loss = 0
     val_accuracy = 0
     with torch.no_grad():
-        for inputs, labels in val_loader:
+        for inputs, labels in dLoad_val:
             outputs = model(inputs).squeeze()
             loss = criterion(outputs, labels)
             val_loss += loss.item()
             val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-    val_loss /= len(val_loader)
-    val_accuracy /= len(val_loader)
+    val_loss /= len(dLoad_val)
+    val_accuracy /= len(dLoad_val)
     print('Validation Loss:', val_loss)
     print('Validation Accuracy:', val_accuracy)
 
     # Evaluate the model on the test set
-    test_loader = DataLoader(TensorDataset(test_data), batch_size=batch_size)
     test_accuracy = 0
     with torch.no_grad():
-        for inputs, labels in test_loader:
+        for inputs, labels in dLoad_test:
             outputs = model(inputs).squeeze()
             test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
-    test_accuracy /= len(test_loader)
+    test_accuracy /= len(dLoad_test)
     print('Test Accuracy:', test_accuracy)
 
     # Save the model
