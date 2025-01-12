@@ -57,12 +57,33 @@ def collate_batch(batch):
 # DataLoader for batching
 from torch.utils.data import DataLoader
 
-train_loader = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate_batch)
-test_loader = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate_batch)
+dLoad_train = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate_batch)
+dLoad_test = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate_batch)
+
+
 
 # Example: Iterate through the DataLoader
-for labels, texts, lengths in train_loader:
+for labels, texts, lengths in dLoad_train:
     print("Labels:", labels)
     print("Texts:", texts)
     print("Lengths:", lengths)
     break
+all_texts = []
+all_labels = []
+
+for text_batch, label_batch in dLoad_train:
+    all_texts.append(text_batch)
+    all_labels.append(label_batch)
+# TRIAL PIECE
+all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
+if all(isinstance(label, torch.Tensor) for label in all_labels):
+    train_labels_tensor = torch.cat(all_labels, dim=0)
+else:
+    raise TypeError("All elements in `all_labels` must be tensors.")
+#END OF TRIAL PIECE
+train_texts_tensor = torch.cat(all_texts,dim=0)
+train_labels_tensor = torch.cat(all_labels,dim=0)
+
+
+print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
+print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
