@@ -27,7 +27,7 @@ import requests
 
 
 class   cnnToLSTMCustom(nn.Module):
-    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs:  int ,batch_size:    int ):
+    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int ):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
@@ -284,7 +284,7 @@ def preprocess_data(data_iter, vocab, max_tokens):
                              torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
 
 
-def process_dataset(combined_dataset=Dataset,vocab):
+def process_dataset(combined_dataset=Dataset):
     #comp sizes for train and initial test splits
     total_size = 50000
     train_size = int(total_size * 0.7)
@@ -296,8 +296,10 @@ def process_dataset(combined_dataset=Dataset,vocab):
         for label, text in data_iter:
             yield tokenizer(text)
 
-    def text_pipeline(text,vocab):
-        return torch.tensor(vocab(tokenizer(text)), dtype=torch.int64)
+    def text_pipeline(text):
+        return tokenizer(text)
+
+        #return torch.tensor(tokenizer(text), dtype=torch.int64)
 
     def label_pipeline(label):
         if isinstance(label, str):
@@ -308,7 +310,7 @@ def process_dataset(combined_dataset=Dataset,vocab):
             else:
                 raise ValueError(f"Unexpected label: {label}")
         elif isinstance(label, int) or label.isdigit():
-            return torch.tensor(int(label) - 1, dtype=torch.float)
+            return torch.tensor(float(int(label) - 1), dtype=torch.float)
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
@@ -344,11 +346,20 @@ if __name__ == "__main__":
     min_lr = 0.0005
 
     token_retriever = get_tokenizer("basic_english")
+
+
     def yield_tokens(data_iter):
-        for label, text in data_iter:
-            yield token_retriever(text)
+        for _, text in data_iter:
+            if isinstance(text, str):  # If `text` is raw text
+                yield token_retriever(text)
+            elif isinstance(text, list):  # If `text` is already tokenized
+                yield text  # Use it directly without tokenizing again
+            else:
+                raise ValueError("Unexpected text format. Expected string or list of tokens.")
+
+
     # Custom iterwrapper
-    class TupleDataset(Dataset):
+    class redoneTupleDataset(Dataset):
         def __init__(self, data):
             self.data = list(data)  # Convert iterable to a list for indexing
 
@@ -356,22 +367,29 @@ if __name__ == "__main__":
             return len(self.data)
 
         def __getitem__(self, idx):
-            return self.data[idx]
+            label,  text    = self.data[idx]
+            return  label,  text
 
     # Convert the datasets into PyTorch Dataset objects
     iter1 = IMDB(root=".data", split='train')
     iter2 = IMDB(root=".data", split='test')
-    iter1_wrapped = TupleDataset(iter1)
-    iter2_wrapped = TupleDataset(iter2)
+    iter1_wrapped = redoneTupleDataset(iter1)
+    iter2_wrapped = redoneTupleDataset(iter2)
+
+
+
+    glove = GloVe(name="6B", dim=embedding_dim)
+    glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+    GloVe_itos = []
 
     # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
     combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
     (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset,)
     vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>","<pad>"])
+    vocab_size = int(len(vocab.get_stoi())//2+1)
     vocab.set_default_index(vocab["<unk>"])
 #finish vocab tomorrow 1/9
-    glove = GloVe(name="6B", dim=embedding_dim)
-    print(type(glove.cache))
+
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
     GloVe_itos = []
 
@@ -394,12 +412,10 @@ if __name__ == "__main__":
 
     # Create vocab-to-index mapping
     #word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-
-    # Initialize embedding matrix
-    pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
-
-    # Populate embedding matrix with GloVe vectors
-    for word, idx in vocab.get_stoi.items():
+#absurdly big auauauaua 100000000
+    pretrained_vectors = torch.zeros((10000000, embedding_dim))
+    # fix the vocab and use glove pretraining
+    for word, idx in vocab.get_stoi().items():
         if word in glove.stoi:  # Check if word is in GloVe's vocabulary
             #pretrained_vectors[idx] = stoi[word]
 
@@ -420,9 +436,9 @@ if __name__ == "__main__":
         texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
         return  labels, texts, text_lengths
 
-    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
-    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
-    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True,shuffle=True)
+    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True,shuffle=True,    collate_fn=collate_batch)
+    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True,shuffle=True,    collate_fn=collate_batch)
+    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True,shuffle=True,  collate_fn=collate_batch)
     #inst_test = IMDB(split="test")
     """
     class   IMDBDataset(Dataset):
@@ -457,8 +473,15 @@ if __name__ == "__main__":
     for text_batch, label_batch in dLoad_train:
         all_texts.append(text_batch)
         all_labels.append(label_batch)
-    all_texts_tensor = torch.cat(all_texts,dim=0)
-    all_labels_tensor = torch.cat(all_labels,dim=0)
+    #TRIAL PIECE
+    all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
+    if all(isinstance(label, torch.Tensor) for label in all_labels):
+        train_labels_tensor = torch.cat(all_labels, dim=0)
+    else:
+        raise TypeError("All elements in `all_labels` must be tensors.")
+    #END OF TRIAL PIECE
+    train_texts_tensor = torch.cat(all_texts,dim=0)
+    train_labels_tensor = torch.cat(all_labels,dim=0)
 
 
     print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
