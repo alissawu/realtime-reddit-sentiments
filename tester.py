@@ -426,16 +426,44 @@ for word, idx in vocab.get_stoi().items():
 # Create PyTorch Embedding Layer
 embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
 
-
+"""
 def collate_batch(batch):
     # after separately pipelining, zip
-    def unzip(location):#location is the address of the object
-        return zip(location)
-    labels, texts = unzip(*batch)
+    labels, texts = zip(*batch)
     labels = torch.tensor(labels)
+    tokenizer=get_tokenizer("basic_english")
+    #texts = vocab(tokenizer(texts))
+    tokenized_texts =   [token_retriever(text)  for text in texts]
+    newer=[vocab(tokenizations)    for tokenizations in tokenized_texts]
+    tensorized_numbertexts   =   torch.tensor(newer)
+    print(tensorized_numbertexts)
+    for i in texts:
+        print(i)
+        print(type(i))
     text_lengths = [len(text) for text in texts]
-    texts = pad_sequence(texts, batch_first=True, padding_value=pad_idx)
-    return labels, texts, text_lengths
+
+    texts = pad_sequence(vocab(token_retriever(texts)), batch_first=True, padding_value=pad_idx)
+    return labels, texts, text_lengths"""
+def collate_batch(batch):
+    # Unpack the batch into labels and texts
+    labels, texts = zip(*batch)
+
+    # Convert labels to tensors
+    labels = torch.tensor(labels)
+
+    # Tokenize texts
+    tokenized_texts = [token_retriever(text) for text in texts]
+
+    # Numericalize tokens
+    numericalized_texts = [torch.tensor([vocab(token) for token in tokens]) for tokens in tokenized_texts]
+
+    # Pad sequences
+    padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
+
+    # Calculate text lengths
+    text_lengths = [len(tokens) for tokens in numericalized_texts]
+
+    return labels, padded_texts, text_lengths
 
 
 dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch)
