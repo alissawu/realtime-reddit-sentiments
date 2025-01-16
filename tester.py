@@ -32,6 +32,7 @@ class   cnnToLSTMCustom(nn.Module):
         #top k2 k4
         #range(0,256,1)
         self.embed  =   nn.Embedding(vocab_size, embedding_dim)
+        print(self.embed.weight.data.size())
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
@@ -537,7 +538,7 @@ print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
     for _, text in data_iter:
         yield token_retriever(text)"""
 
-model = cnnToLSTMCustom(vocab_size, 300, pretrained_vectors,
+model = cnnToLSTMCustom(10000000, 300, pretrained_vectors,
                         batch_size)  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
 # Define loss and optimizer
