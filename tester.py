@@ -531,8 +531,8 @@ train_labels_tensor = torch.cat(all_labels, dim=0)
 
 
 
-print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
-print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
+#print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
+#print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
 
 """def yield_token(data_iter):
     for _, text in data_iter:
