@@ -447,7 +447,7 @@ def collate_batch(batch):
 def collate_batch(batch):
     # Unpack the batch into labels and texts
     labels, texts = zip(*batch)
-
+    max_length = 4096
     # Convert labels to tensors
     labels = torch.tensor(labels)
 
@@ -455,15 +455,20 @@ def collate_batch(batch):
     tokenized_texts = [token_retriever(text) for text in texts]
 
     # Numericalize tokens
-    numericalized_texts = [torch.tensor([vocab(token) for token in tokens]) for tokens in tokenized_texts]
 
-    # Pad sequences
+    numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
+    if len(numericalized_texts[0]) < max_length:
+        numericalized_texts[0] = torch.cat(
+            [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
+        )
+    else:
+        numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
     padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
 
     # Calculate text lengths
     text_lengths = [len(tokens) for tokens in numericalized_texts]
 
-    return labels, padded_texts, text_lengths
+    return labels, padded_texts#, text_lengths
 
 
 dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch)
@@ -500,8 +505,8 @@ imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
 all_texts = []
 all_labels = []
 
-for text_batch, label_batch in dLoad_train:
-    all_texts.append(vocab(text_batch))
+for label_batch,    text_batch in dLoad_train:
+    all_texts.append(text_batch)
     all_labels.append(label_batch)
 # TRIAL PIECE
 all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
@@ -510,7 +515,13 @@ if all(isinstance(label, torch.Tensor) for label in all_labels):
 else:
     raise TypeError("All elements in `all_labels` must be tensors.")
 # END OF TRIAL PIECE
+print(all_texts)
+text_shapes =   [text.shape   for  text in all_texts]
+print(text_shapes)
+#dim_problems
+
 train_texts_tensor = torch.cat(all_texts, dim=0)
+print(train_texts_tensor)
 train_labels_tensor = torch.cat(all_labels, dim=0)
 
 """import torch
