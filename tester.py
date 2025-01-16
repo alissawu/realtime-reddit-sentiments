@@ -332,10 +332,12 @@ def process_dataset(combined_dataset=Dataset):
 
 
 # params
-max_len = 256
+max_len = 256#realistitcally 2752
 padding_type = 'post'
-vocab_size = 10000000
+vocab_size = 10000000#to be changed later
 embedding_dim = 300
+#max token
+
 
 # hypers
 batch_size = 16
@@ -412,7 +414,7 @@ pad_idx = vocab["<pad>"]
 # Create vocab-to-index mapping
 # word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
 # absurdly big auauauaua 10000000
-pretrained_vectors = torch.zeros((10000000, embedding_dim))
+pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
 # fix the vocab and use glove pretraining
 for word, idx in vocab.get_stoi().items():
     if word in glove.stoi:  # Check if word is in GloVe's vocabulary
@@ -538,7 +540,7 @@ train_labels_tensor = torch.cat(all_labels, dim=0)
     for _, text in data_iter:
         yield token_retriever(text)"""
 
-model = cnnToLSTMCustom(10000000, 300, pretrained_vectors,
+model = cnnToLSTMCustom(vocab_size, 300, pretrained_vectors,
                         batch_size)  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
 # Define loss and optimizer
