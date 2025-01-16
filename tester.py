@@ -333,7 +333,7 @@ def process_dataset(combined_dataset=Dataset):
 # params
 max_len = 256
 padding_type = 'post'
-vocab_size = 65536
+vocab_size = 10000000
 embedding_dim = 300
 
 # hypers
@@ -410,7 +410,7 @@ pad_idx = vocab["<pad>"]
 
 # Create vocab-to-index mapping
 # word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-# absurdly big auauauaua 100000000
+# absurdly big auauauaua 10000000
 pretrained_vectors = torch.zeros((10000000, embedding_dim))
 # fix the vocab and use glove pretraining
 for word, idx in vocab.get_stoi().items():
@@ -515,15 +515,74 @@ if all(isinstance(label, torch.Tensor) for label in all_labels):
 else:
     raise TypeError("All elements in `all_labels` must be tensors.")
 # END OF TRIAL PIECE
-print(all_texts)
+#print(all_texts)
 text_shapes =   [text.shape   for  text in all_texts]
-print(text_shapes)
+#print(text_shapes)
 #dim_problems
 
 train_texts_tensor = torch.cat(all_texts, dim=0)
-print(train_texts_tensor)
+#print(train_texts_tensor)
 train_labels_tensor = torch.cat(all_labels, dim=0)
 
+
+
+
+
+
+
+print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
+print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
+
+"""def yield_token(data_iter):
+    for _, text in data_iter:
+        yield token_retriever(text)"""
+
+model = cnnToLSTMCustom(vocab_size, 300, pretrained_vectors,
+                        batch_size)  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+
+# Define loss and optimizer
+criterion = nn.BCELoss()
+optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+# Train the model
+
+model.train()
+for epoch in range(epoch_count):
+    for inputs, labels in dLoad_train:
+        outputs = model(inputs).squeeze()
+        loss = criterion(outputs, labels)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    print(f'Epoch {epoch + 1}/{epoch_count}, Loss: {criterion.item()}')
+
+# Validate the model
+model.eval()
+val_loss = 0
+val_accuracy = 0
+with torch.no_grad():
+    for inputs, labels in dLoad_val:
+        outputs = model(inputs).squeeze()
+        loss = criterion(outputs, labels)
+        val_loss += loss.item()
+        val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+val_loss /= len(dLoad_val)
+val_accuracy /= len(dLoad_val)
+print('Validation Loss:', val_loss)
+print('Validation Accuracy:', val_accuracy)
+
+# Evaluate the model on the test set
+test_accuracy = 0
+with torch.no_grad():
+    for inputs, labels in dLoad_test:
+        outputs = model(inputs).squeeze()
+        test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+test_accuracy /= len(dLoad_test)
+print('Test Accuracy:', test_accuracy)
+
+# Save the model
+torch.save(model.state_dict(), 'sentiment_model.pth')
 """import torch
 from torchtext.datasets import IMDB
 from torchtext.data.utils import get_tokenizer
