@@ -284,6 +284,7 @@ def preprocess_data(data_iter, vocab, max_tokens):
                              torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
 
 
+
 def process_dataset(combined_dataset=Dataset):
     #comp sizes for train and initial test splits
     total_size = 50000
@@ -314,6 +315,7 @@ def process_dataset(combined_dataset=Dataset):
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
+        print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
         return  [(label_pipeline(label),text_pipeline(text))
                  for label, text in raw_data_split
         ]
@@ -323,14 +325,9 @@ def process_dataset(combined_dataset=Dataset):
     #train_size =   25000+25000//split_1 or 50000*0.7
     #test_size   =   25000(1-1//split_1) or 50000*0.1
     #val_size   =   25000(8/10-2/5) or 50000*0.2
-    # Split the test_data further into train_data, val_data, and test
 
     # Preprocess all datasets using label and text pipelines
-    train_data  = pipeline_driver(train_dSet)
-    val_data    = pipeline_driver(test_dSet)
-    test_data   = pipeline_driver(val_dSet)
-
-    return (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)
+    return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet))
 
 if __name__ == "__main__":
     #params
