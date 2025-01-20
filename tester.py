@@ -334,7 +334,7 @@ def process_dataset(combined_dataset=Dataset):
 # params
 max_len = 256#realistitcally 2752
 padding_type = 'post'
-vocab_size = 10000000#to be changed later
+vocab_size = 130000#to be changed later
 embedding_dim = 300
 #max token
 
@@ -386,7 +386,7 @@ GloVe_itos = []
 combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
 (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)
 vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"])
-vocab_size = int(len(vocab.get_stoi()) // 2 + 1)
+vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
 vocab.set_default_index(vocab["<unk>"])
 
 
@@ -416,10 +416,11 @@ pad_idx = vocab["<pad>"]
 # absurdly big auauauaua 10000000
 pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
 # fix the vocab and use glove pretraining
+print(f"Max idx: {max(vocab.get_stoi().values())}")
+print(pretrained_vectors.shape)
 for word, idx in vocab.get_stoi().items():
     if word in glove.stoi:  # Check if word is in GloVe's vocabulary
         # pretrained_vectors[idx] = stoi[word]
-
         pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float)
     elif word == "<pad>":  # Padding vector (optional, all zeros by default)
         pretrained_vectors[idx] = torch.zeros(embedding_dim)
