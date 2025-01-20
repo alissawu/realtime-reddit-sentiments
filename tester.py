@@ -54,8 +54,10 @@ class   cnnToLSTMCustom(nn.Module):
         self.dropout = nn.Dropout(0.25)
         self.fc2 = nn.Linear(16,2)
     def forward(self, x):
-        x = self.embed(x).permute(0, 2, 1)
-
+        print(x)
+        x = self.embed(x)
+        print(x.shape)
+        x   =        x.permute(0, 2, 1)
         # CNN Layers
         topk2 = self.kern2s1(x)
         topk4 = self.kern4s2(x)
@@ -315,7 +317,9 @@ def process_dataset(combined_dataset=Dataset):
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
-        print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
+        print(f"Max Len:     {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
+        #print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
+        print(f"# of too big:{sum(len(text_pipeline(text)) > 2048 for _, text in raw_data_split)}")
         return  [(label_pipeline(label),text_pipeline(text))
                  for label, text in raw_data_split
         ]
