@@ -395,7 +395,56 @@ GloVe_itos = []
 
 # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
 combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
-(train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)
+(train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
+
+
+
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples(dataset, tokenizer, max_tokens=2048):
+    filtered_data = []
+    for item in dataset:
+        text, label = item  # Assuming each item is a (text, label) tuple
+        tokenized_text = tokenizer(text)  # Tokenize the text
+        if len(tokenized_text) <= max_tokens:
+            filtered_data.append(item)
+    return filtered_data
+
+# Applying the filtering function to each dataset
+from torchtext.data.utils import get_tokenizer
+
+tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
+train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
+val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
+test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
+
+# Wrap the filtered datasets into PyTorch Dataset objects
+train_dSet = redoneTupleDataset(train_dSet_filtered)
+val_dSet = redoneTupleDataset(val_dSet_filtered)
+test_dSet = redoneTupleDataset(test_dSet_filtered)
+
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
+    return [(text, label) for text, label in data if len(tokenizer(text)) <= max_tokens]
+
+
+train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
+val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
+test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
+
+# Replace original data with filtered data
+train_data = train_data_filtered
+val_data = val_data_filtered
+test_data = test_data_filtered
+
+
+
+
+
+
+
+
 vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"])
 vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
 vocab.set_default_index(vocab["<unk>"])
