@@ -27,10 +27,11 @@ import requests
 
 
 class   cnnToLSTMCustom(nn.Module):
-    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int ):
+    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int , max_len:    int):
         super(cnnToLSTMCustom,self).__init__()
         #top k2 k4
         #range(0,256,1)
+        self.max_len = max_len
         self.embed  =   nn.Embedding(vocab_size, embedding_dim)
         print(self.embed.weight.data.size())
         self.embed.weight.data.copy_(pretrained_vecs)
@@ -148,6 +149,7 @@ class   cnnToLSTMCustom(nn.Module):
 
     def kern2ImagTransformer(input_tensor):
         # Original tensor of shape (N, 300, 255)
+        #batch_size,300,4095
         N, seq_len, num_filters = 4, 300, 255  # Example sizes
         output_tensor=input_tensor.to(dtype=torch.complex64)
         #input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
@@ -175,6 +177,8 @@ class   cnnToLSTMCustom(nn.Module):
 
     def kern4ImagTransformer(self,input_tensor):
         # Original tensor of shape (N, 300, 127)
+        #batch_size,300,4096/2+1
+
         N, embedding_dim, num_filters = 4, 300, 127  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
@@ -191,6 +195,7 @@ class   cnnToLSTMCustom(nn.Module):
         return output_tensor
     def kern3Transformer(self,input_tensor):
         # Original tensor of shape (N, 300, 86)
+        #batch_size,300,4096/3+1
         N, embedding_dim, num_filters = 16, 300, 86  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
@@ -207,6 +212,8 @@ class   cnnToLSTMCustom(nn.Module):
     def kern6ImagTransformer(self,input_tensor):
 
         # Original tensor of shape (N, 300, 85)
+        #batch_size,300,4096/3
+
         N, embedding_dim, num_filters = 16, 300, 85  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 256 * 2, dtype=torch.complex64)
