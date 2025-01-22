@@ -553,7 +553,7 @@ train_labels_tensor = torch.cat(all_labels, dim=0)
         yield token_retriever(text)"""
 
 model = cnnToLSTMCustom(vocab_size, 300, pretrained_vectors,
-                        batch_size)  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
+                        batch_size,int(4096/2))  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
 # Define loss and optimizer
 criterion = nn.BCELoss()
