@@ -35,7 +35,7 @@ class   cnnToLSTMCustom(nn.Module):
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
-
+#
         self.kern2s1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=2,stride=1) #255
         self.kern4s2 = nn.Conv1d(in_channels=256, out_channels=300, kernel_size=4, stride=2)#127
         #mid k3 k6

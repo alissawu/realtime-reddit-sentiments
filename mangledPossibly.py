@@ -21,7 +21,122 @@ from collections import Counter, OrderedDict
 import numpy as np
 import requests
 
+"""
+class   IMDBDataset(Dataset):
+    def __init__(self, dataset, tokenizer,vocab):
+        self.dataset = dataset
+        self.tokenizer = tokenizer
+        self.vocab = vocab
 
+    def __len__(self):
+        return len(self.dataset)
+    def __getitem__(self, idx):
+        label,text  =   self.dataset[idx]
+
+        label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
+        text_tokens = self.tokenizer(text)
+        text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
+        return  text_tensor, label_tensor
+imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
+
+
+    text_list, label_list = [],[]
+    for text, label in batch:
+        text_list.append(text)
+        label_list.append(label)
+    text_padded =   pad_sequence(text_list, batch_first=True,   padding_value=stoi['<pad>'])
+    labels  =   torch.tensor(label_list, dtype=torch.float)
+    return text_padded, labels"""
+
+
+
+
+
+""""# Read the GloVe file to extract tokens
+with open(glove_path, "r", encoding="utf-8") as f:
+    for line in f:
+        token = line.split()[0]  # First element is the token
+        GloVe_itos.append(token)
+#GloVe_itos  =   GloVe.Vocab.get_itos()
+"""
+
+
+
+#cutesry
+"""class   initialSentModel(nn.Module):
+    def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
+        super(initialSentModel,    self).__init__()
+        self.recurrDropout =   0.25
+        self.embedding = nn.Embedding.from_embedding(pre_train_embeds,freeze=False)
+                #max_norm (float, optional) – See module initialization documentation.
+                #norm_type (float, optional) – See module initialization documentation. Default 2.
+                #scale_grad_by_freq (bool, optional) – See module initialization documentation. Default False.
+                #sparse (bool, optional) – See module initialization documentation.
+        self.lstm1 = nn.LSTM(300, 512, batch_first=True,bidirectional=True)
+        self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
+"""
+
+"""
+def preprocess_data(data_iter, vocab, max_tokens):
+    preprocessed = []
+    padding_idx = 0
+    print(dir(data_iter))
+    print(type(data_iter))
+    for label, text in data_iter:
+        print(label)
+        tokenized_text = token_retriever(text)
+        token_ids = vocab(tokenized_text)[:max_len]
+        padding_needed = max_tokens - len(token_ids)
+        left_padding = padding_needed // 2
+        right_padding = padding_needed - left_padding  # Handle odd-length padding
+
+        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
+        preprocessed.append((torch.tensor(padded_text, dtype=torch.long),
+                             torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
+print("""    def forward(self,x):
+        x   =   self.embed(x).permute(0,2,1)
+        embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
+
+        embedding_tensor[:, :, 1::2]    =   x
+        topk2   =   self.kern2s1(x)
+        transform_topk2 =   self.kern2ImagTransformer(topk2.transpose(1,2))
+        topk4   =   self.kern4s2(x)
+        transform_topk4 =   self.kern4ImagTransformer(topk4.transpose(1,2))
+        #upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
+        upper   =   transform_topk2 +   transform_topk4
+        midk3=self.kern3s3p1(x)
+        transform_midk3 = self.kern3ImagTransformer(midk3.transpose(1,2))
+        midk6=self.kern6s3p1(x)
+        transform_midk6 = self.kern6ImagTransformer(midk6.transpose(1,2))
+        middle  =   transform_midk3 +   transform_midk6
+        lowk5 = self.kern5s3p1(x)
+        transform_lowk5 = self.kern5ImagTransformer(lowk5.transpose(1,2))
+        lower  =    embedding_tensor    +   transform_lowk5
+        upp_outputs,_ =   self.uppLSTM(upper)
+        mid_outputs,_ =   self.midLSTM(middle)
+        low_outputs,_ =   self.lowLSTM(lower)
+
+        pair12  =   upp_outputs +   mid_outputs
+        pair23  =   mid_outputs +   upp_outputs
+        pair13  =   low_outputs +   upp_outputs
+        trip    =   upp_outputs +   mid_outputs +   low_outputs
+
+        normedWeights   =   F.softmax(self.weights,dim=0)
+
+
+
+        fused   =   torch.mean(normedWeights[0]    *   pair12,
+            normedWeights[1]    *   pair23,
+            normedWeights[2]    *   pair13,
+            normedWeights[3]    *   trip, dim=1)
+
+        even_cells = fused[:, 0::2, :]  # Select even indices
+        odd_cells = fused[:, 1::2, :]
+        crunched = torch.cat((even_cells, odd_cells), dim=-1)
+        swisher =   nn.SiLU(self.fc1(crunched))
+        dropOuts    =   self.dropout(swisher)
+        outputs =   F.softmax(self.fc2(dropOuts),dim=1)
+        return outputs""")
 # from epoch_test import batch_size, train_loader
 
 
