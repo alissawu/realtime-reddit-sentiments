@@ -15,7 +15,7 @@ from torchtext.data.utils import get_tokenizer
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
 from torch.utils.data import ConcatDataset
 
-
+from tqdm import tqdm
 
 from    collections import  Counter,    OrderedDict
 #https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
@@ -37,6 +37,7 @@ class   cnnToLSTMCustom(nn.Module):
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
+        self.num_components = 512
 
         self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1) #255 to 2047
         self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2)#127 to 1023
@@ -45,9 +46,9 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
         #bottom k4
         self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
-        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
-        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
-        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
+        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
+        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
+        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
 
         self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
 
@@ -57,22 +58,16 @@ class   cnnToLSTMCustom(nn.Module):
     def forward(self, x):
         print(f"X Input: {x}")
         x = self.embed(x)
-        print(f"Embedded Shape: {x.shape}")
         x   =        x.permute(0, 2, 1)
-        print(f"Permuted Shape: {x.shape}")
 
         # CNN Layers
         topk2   =   self.kern2ImagTransformer(self.kern2s1(x))
         topk4   =   self.kern4ImagTransformer(self.kern4s2(x))
         midk3   =   self.kern3ImagTransformer(self.kern3s3p1(x))
         midk6   =   self.kern6ImagTransformer(self.kern6s3p1(x))
-        lowk5   =   self.kern5ImagTransformer(self.kern5s3p1(x))
+        lowk5   =   self.kern5ImagTransformer(self.kern5s3(x))
 
-        print(f"topk2 Shape: {topk2.shape}")
-        print(f"topk4 Shape: {topk4.shape}")
-        print(f"midk3 Shape: {midk3.shape}")
-        print(f"midk6 Shape: {midk6.shape}")
-        print(f"lowk5 Shape: {lowk5.shape}")
+
         # 16,300,4096 into LSTM into Outputs
         upp_outputs, _ = self.uppLSTM(topk2.transpose(1, 2) + topk4.transpose(1, 2))
         mid_outputs, _ = self.midLSTM(midk3.transpose(1, 2) + midk6.transpose(1, 2))
@@ -102,7 +97,6 @@ class   cnnToLSTMCustom(nn.Module):
         swisher = F.silu(self.fc1(fused.mean(dim=1)))
         dropout = self.dropout(swisher)
         outputs = F.softmax(self.fc2(dropout), dim=1)
-
         return outputs
 
         # noinspection PyUnreachableCode
@@ -121,23 +115,13 @@ class   cnnToLSTMCustom(nn.Module):
         # Create the output tensor
         output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
 
-        # Assign values
-        #output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
-        #output_tensor[:, :, 2:-1:2] = input_tensor  # Populate indices (2i+2)
-        #
-        #
-        #
-        # Step 2: Assign values for each filter to the mapped indices
         for i in range(num_filters):
             #[orig,overlap_back]
             # For each filter, map to positions 2i+1 and 2i+2
-            print(f"output_tensor: {output_tensor.shape} vs {input_tensor.shape}")
             output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
             output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
-        print(f"output_tensor shape: {output_tensor.shape}")  # Should be (N, 300, 4096)
         return output_tensor
-
     def kern4ImagTransformer(self,input_tensor):
         #batch_size,300,1023  k4s2
         N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
@@ -148,11 +132,7 @@ class   cnnToLSTMCustom(nn.Module):
             indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
             # Assign the input filter values as imaginary numbers to the output at the computed indices
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
-        """# Step 3: Populate the indices for each filter, making values imaginary
-        for idx, i in enumerate(range(0, len(indices), 4)):
-            # Assign the input values to the imaginary part of the output tensor
-            output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
-        """
+
         return output_tensor
     def kern3ImagTransformer(self,input_tensor):
         #batch_size,300,684     k3s3p2
@@ -195,8 +175,6 @@ class   cnnToLSTMCustom(nn.Module):
 
         output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
         return output_tensor
-
-
     def kern5ImagTransformer(self,input_tensor):
         #batch_size,300,682 k5s3p0
         N, embedding_dim, num_filters = self.batch_size, 300, 682
@@ -224,6 +202,214 @@ class   cnnToLSTMCustom(nn.Module):
         return output_tensor
 
 
+class   cnnToLSTMCustomInterleaving(nn.Module):
+    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int , max_len:    int):
+        super(cnnToLSTMCustomInterleaving,self).__init__()
+        #top k2 k4
+        #range(0,256,1)
+        self.max_len = max_len
+        self.embed  =   nn.Embedding(vocab_size, embedding_dim)
+        print(self.embed.weight.data.size())
+        self.embed.weight.data.copy_(pretrained_vecs)
+        self.embed.weight.requires_grad = False
+        self.batch_size = batch_size
+        self.num_components = 512
+
+        self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1) #255 to 2047
+        self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2)#127 to 1023
+        #mid k3 k6
+        self.kern3s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=3,stride=3, padding=2)#(2045+2*2)/3+1=684 from 86
+        self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
+        #bottom k4
+        self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
+
+        self.LSTM_hidden    =   1024
+        self.uppLSTM = nn.LSTM(600, 4096, batch_first=True, bidirectional=True)  #300*2 for interleaved
+        self.midLSTM = nn.LSTM(600, 4096, batch_first=True, bidirectional=True)  #300*2 for interleaved
+        self.lowLSTM = nn.LSTM(300, 4096, batch_first=True, bidirectional=True)  #no complex values
+        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
+
+        self.fc1    =   nn.Linear(2048,16)
+        self.dropout = nn.Dropout(0.25)
+        self.fc2 = nn.Linear(32,2)
+
+    def forward(self, x):
+        x = self.embed(x)
+        x = x.permute(0, 2, 1)
+
+        # CNN Layers
+        topk2 = self.kern2ImagTransformer(self.kern2s1(x))
+        topk4 = self.kern4ImagTransformer(self.kern4s2(x))
+        midk3 = self.kern3ImagTransformer(self.kern3s3p1(x))
+        midk6 = self.kern6ImagTransformer(self.kern6s3p1(x))
+        lowk5 = self.kern5ImagTransformer(self.kern5s3(x))
+
+        def interleave_complex(complex_tensor):
+            real_part = complex_tensor.real
+            imag_part = complex_tensor.imag
+            batch_size, channels, seq_len = real_part.shape
+
+            # Create interleaved tensor
+            interleaved = torch.zeros(batch_size, channels * 2, seq_len,
+                                      device=real_part.device,
+                                      dtype=torch.float32)
+
+            # Interleave real and imaginary parts
+            interleaved[:, 0::2, :] = real_part
+            interleaved[:, 1::2, :] = imag_part
+            return interleaved
+
+        # Process complex combinations with interleaving
+        upper_combined = topk2 + topk4
+        upper_input = interleave_complex(upper_combined).transpose(1, 2)
+
+        mid_combined = midk3 + midk6
+        mid_input = interleave_complex(mid_combined).transpose(1, 2)
+
+        # Process through LSTMs
+        upp_outputs, _ = self.uppLSTM(upper_input)
+        mid_outputs, _ = self.midLSTM(mid_input)
+        low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
+
+        def apply_pla(features):
+            # Move mean calculation earlier to reduce memory
+            features = features.mean(dim=1)
+
+            # Process in chunks if needed
+            chunk_size = 1024
+            if features.shape[1] > chunk_size:
+                cov_matrix = torch.zeros(features.shape[1], features.shape[1],
+                                         device=features.device)
+                for i in range(0, features.shape[1], chunk_size):
+                    end = min(i + chunk_size, features.shape[1])
+                    chunk = features[:, i:end]
+                    cov_matrix[i:end] = chunk.T @ chunk
+            else:
+                cov_matrix = features.T @ features
+
+            eigvals, eigvecs = torch.linalg.eigh(cov_matrix)
+
+            # Sort and select top components
+            sorted_indices = torch.argsort(eigvals, descending=True)
+            top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
+
+            return features @ top_k_eigvecs
+
+        # Apply PLA to LSTM outputs
+        upp_features = apply_pla(upp_outputs)
+        mid_features = apply_pla(mid_outputs)
+        low_features = apply_pla(low_outputs)
+
+        # Combine PLA-reduced features
+        fused = upp_features + mid_features + low_features
+
+        # Fully Connected Layers
+        swisher = F.silu(self.fc1(fused))
+        dropout = self.dropout(swisher)
+        final_outputs = F.softmax(self.fc2(dropout), dim=1)
+        return final_outputs
+
+        # noinspection PyUnreachableCode
+
+
+
+
+
+    def kern2ImagTransformer(self,  input_tensor):
+        #batch_size,300,2047   k2s1
+        N, seq_len, num_filters = self.batch_size, 300, 2047
+        ## Create index mapping for placement
+        #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
+        #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
+
+        # Create the output tensor
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
+
+        for i in range(num_filters):
+            #[orig,overlap_back]
+            # For each filter, map to positions 2i+1 and 2i+2
+            output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
+            output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
+
+        return output_tensor
+    def kern4ImagTransformer(self,input_tensor):
+        #batch_size,300,1023  k4s2
+        N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
+        for i in range(num_filters):
+            # Compute target indices for filter i
+            indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
+            # Assign the input filter values as imaginary numbers to the output at the computed indices
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
+    def kern3ImagTransformer(self,input_tensor):
+        #batch_size,300,684     k3s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
+        #[][][,1]
+        #[,3][,5][,7]
+        #[][][]
+        #[][][]
+        # clip off the first filter at index 0
+        #output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
+        for i in range(1, 683):
+            indices = [6*i-3, 6*i-1, 6*i+1]#4089,4091,4093
+            output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
+
+        #cut off outlier filter at index 683
+#        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
+        return output_tensor
+    def kern6ImagTransformer(self,input_tensor):
+
+        # Original tensor of shape (N, 300, 683)
+        #batch_size,300,683 k6s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1][2,][4,][6,]
+        # [,3][,5][,7][8,][10,][12,]
+        # [][][][][][]
+        # [][][][][][]
+        # Outlier filter 0
+        output_tensor[:, :, [1, 2, 4, 6]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+        # Regular filters 1 to 682
+        for i in range(1, 682):#3,5,7, 8 , 10, 12
+            indices = [6*i-3, 6*i-1, 6*i+1, 6*i+2, 6*i+4,6*i+6]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
+#12:58.  1/23/25
+        # Outlier filter _4083, _4085, _4087, 4088_, 4090_, 4092_
+        # Outlier filter _4089, _4091, _4093, 4094_, __, __
+
+        output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
+        return output_tensor
+    def kern5ImagTransformer(self,input_tensor):
+        #batch_size,300,682 k5s3p0
+        N, embedding_dim, num_filters = self.batch_size, 300, 682
+
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
+
+        # Step 2: Assign imaginary values for outlier filter 0
+        output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+
+        #[,1][,3][,5][6,][8,]
+        #[,7][,9][,11][12,][14,]
+        #[,13] [,15] [,17] [18,] [20,]
+        #[,19][,21][,23][24,][26,]
+        for i in range(1, 682):
+            indices = [
+                6 * (i - 1) + 1,
+                6 * (i - 1) + 3,
+                6 * (i - 1) + 5,
+                6 * (i - 1) + 6,
+                6 * (i - 1) + 8
+            ]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
 
 
 
@@ -489,14 +675,8 @@ text_shapes =   [text.shape   for  text in all_texts]
 #dim_problems
 
 train_texts_tensor = torch.cat(all_texts, dim=0)
-#print(train_texts_tensor)
-train_labels_tensor = torch.cat(all_labels, dim=0)
-
-
-
-
-
-
+train_labels_tensor = torch.cat(all_labels, dim=0) - 1
+print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
 
 #print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
 #print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
@@ -505,143 +685,67 @@ train_labels_tensor = torch.cat(all_labels, dim=0)
     for _, text in data_iter:
         yield token_retriever(text)"""
 
-model = cnnToLSTMCustom(vocab_size, 300, pretrained_vectors,
-                        batch_size,int(2048))  # SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
-
-# Define loss and optimizer
+# Training setup
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = cnnToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
+                                    batch_size, int(2048)).to(device)
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-# Train the model
-
+# Training loop with progress tracking
+print(f"Starting training on {device}")
 model.train()
 for epoch in range(epoch_count):
-    for labels, inputs in dLoad_train:
-        outputs = model(inputs)#.squeeze()
+    epoch_loss = 0
+    progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
+
+    for batch_idx, (labels, inputs) in enumerate(progress_bar):
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        outputs = model(inputs)
         loss = criterion(outputs, labels)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    print(f'Epoch {epoch + 1}/{epoch_count}, Loss: {criterion.item()}')
 
-# Validate the model
+        epoch_loss += loss.item()
+
+        # Update progress bar
+        progress_bar.set_postfix({'batch_loss': f'{loss.item():.4f}',
+                                  'avg_loss': f'{epoch_loss / (batch_idx + 1):.4f}'})
+
+    print(f'Epoch {epoch + 1}/{epoch_count}, Average Loss: {epoch_loss / len(dLoad_train):.4f}')
+
+# Validation with progress tracking
+print("\nStarting validation...")
 model.eval()
 val_loss = 0
 val_accuracy = 0
 with torch.no_grad():
-    for inputs, labels in dLoad_val:
-        outputs = model(inputs).squeeze()
+    for inputs, labels in tqdm(dLoad_val, desc='Validation'):
+        inputs, labels = inputs.to(device), labels.to(device)
+        outputs = model(inputs)
         loss = criterion(outputs, labels)
         val_loss += loss.item()
         val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+
 val_loss /= len(dLoad_val)
 val_accuracy /= len(dLoad_val)
-print('Validation Loss:', val_loss)
-print('Validation Accuracy:', val_accuracy)
+print(f'Validation Loss: {val_loss:.4f}')
+print(f'Validation Accuracy: {val_accuracy:.4f}')
 
-# Evaluate the model on the test set
+# Test evaluation with progress tracking
+print("\nStarting test evaluation...")
 test_accuracy = 0
 with torch.no_grad():
-    for inputs, labels in dLoad_test:
-        outputs = model(inputs).squeeze()
+    for inputs, labels in tqdm(dLoad_test, desc='Testing'):
+        inputs, labels = inputs.to(device), labels.to(device)
+        outputs = model(inputs)
         test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+
 test_accuracy /= len(dLoad_test)
-print('Test Accuracy:', test_accuracy)
+print(f'Test Accuracy: {test_accuracy:.4f}')
 
 # Save the model
 torch.save(model.state_dict(), 'sentiment_model.pth')
-"""import torch
-from torchtext.datasets import IMDB
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator
-from torch.nn.utils.rnn import pad_sequence
-
-# Define tokenizer and vocabulary
-tokenizer = get_tokenizer("basic_english")
-
-# Function to yield tokens from the dataset
-def yield_tokens(data_iter):
-    for label, text in data_iter:
-        yield tokenizer(text)
-
-# Load train split to build vocabulary
-train_iter = IMDB(root=".data", split="train")
-vocab = build_vocab_from_iterator(yield_tokens(train_iter), specials=["<unk>"])
-vocab.set_default_index(vocab["<unk>"])
-
-# Helper function to process text to tensor
-def text_pipeline(text):
-    #print(f"{len(vocab(tokenizer(text)))}   {tokenizer(text)}{text}    \n")
-    #print(f"{max(len(tokenizer(text)))}")
-    print(vocab(tokenizer(text)))
-    return torch.tensor(vocab(tokenizer(text)), dtype=torch.int64)
-
-# Helper function to process labels to tensor
-def label_pipeline(label):
-    if  isinstance(label, str):
-        if label == "pos":
-            return torch.tensor(1, dtype=torch.float)
-        elif    label == "neg":
-            return torch.tensor(0, dtype=torch.float)
-        else:
-            raise ValueError(f"Unexpected label: {label}")
-    elif    isinstance(label, int)  or label.isdigit():
-        return torch.tensor(int(label)-1, dtype=torch.float)
-    else:
-        raise ValueError(f"Unsupported label type: {label}")
-    # Load train and test data with transformations
-def process_dataset(split):
-    raw_iter = IMDB(root=".data", split=split)
-    data = [
-        (label_pipeline(label), text_pipeline(text))
-        for label, text in raw_iter
-    ]
-    print(f"{split}   {max([len(text_pipeline(text)) for _, text in raw_iter])}")
-    return data
-
-train_data = process_dataset("train")
-test_data = process_dataset("test")
-
-# Example: Pad sequences for batching
-def collate_batch(batch):
-    labels, texts = zip(*batch)
-    labels = torch.stack(labels)
-    text_lengths = [len(text) for text in texts]
-    texts = pad_sequence(texts, batch_first=True)
-    return labels, texts, text_lengths
-
-# DataLoader for batching
-from torch.utils.data import DataLoader
-
-dLoad_train = DataLoader(train_data, batch_size=32, shuffle=True, collate_fn=collate_batch)
-dLoad_test = DataLoader(test_data, batch_size=32, shuffle=False, collate_fn=collate_batch)
-
-
-
-# Example: Iterate through the DataLoader
-for labels, texts, lengths in dLoad_train:
-    print("Labels:", labels)
-    print("Texts:", texts)
-    print("Lengths:", lengths)
-    print(max(lengths))
-    break
-all_texts = []
-all_labels = []
-
-for text_batch, label_batch in dLoad_train:
-    all_texts.append(text_batch)
-    all_labels.append(label_batch)
-# TRIAL PIECE
-all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
-if all(isinstance(label, torch.Tensor) for label in all_labels):
-    train_labels_tensor = torch.cat(all_labels, dim=0)
-else:
-    raise TypeError("All elements in `all_labels` must be tensors.")
-#END OF TRIAL PIECE
-train_texts_tensor = torch.cat(all_texts,dim=0)
-train_labels_tensor = torch.cat(all_labels,dim=0)
-
-
-print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
-print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))"""
