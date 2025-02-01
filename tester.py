@@ -271,6 +271,23 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         mid_outputs, _ = self.midLSTM(mid_input)
         low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
 
+        def apply_pca(self, features):
+            # Center the data
+            mean = torch.mean(features, dim=0, keepdim=True)
+            centered_data = features - mean
+
+            # Compute covariance matrix
+            cov_matrix = torch.matmul(centered_data.T, centered_data) / (features.shape[0] - 1)
+
+            # Compute eigenvectors and eigenvalues
+            eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
+
+            # Sort eigenvectors by eigenvalues in descending order
+            sorted_indices = torch.argsort(eigenvalues, descending=True)
+            top_eigenvectors = eigenvectors[:, sorted_indices[:self.num_components]]
+
+            # Project the data
+            return torch.matmul(centered_data, top_eigenvectors)
         def apply_pla(features):
             # Move mean calculation earlier to reduce memory
             features = features.mean(dim=1)
