@@ -38,13 +38,13 @@ class   cnnToLSTMCustom(nn.Module):
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
 
-        self.kern2s1 =   nn.Conv1d(in_channels=2048,out_channels=300,kernel_size=2,stride=1) #255 to 2047
-        self.kern4s2 = nn.Conv1d(in_channels=2048, out_channels=300, kernel_size=4, stride=2)#127 to 1023
+        self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1) #255 to 2047
+        self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2)#127 to 1023
         #mid k3 k6
-        self.kern3s3p1 =   nn.Conv1d(in_channels=2048,out_channels=300,kernel_size=3,stride=3, padding=2)#(2045+2*2)/3+1=684 from 86
-        self.kern6s3p1 =   nn.Conv1d(in_channels=2048,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
+        self.kern3s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=3,stride=3, padding=2)#(2045+2*2)/3+1=684 from 86
+        self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
         #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=2048,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
+        self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
         self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
         self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
         self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True)
@@ -55,19 +55,25 @@ class   cnnToLSTMCustom(nn.Module):
         self.dropout = nn.Dropout(0.25)
         self.fc2 = nn.Linear(32,2)
     def forward(self, x):
-        print(x)
+        print(f"X Input: {x}")
         x = self.embed(x)
-        print(x.shape)
+        print(f"Embedded Shape: {x.shape}")
         x   =        x.permute(0, 2, 1)
+        print(f"Permuted Shape: {x.shape}")
+
         # CNN Layers
-        topk2 = self.kern2s1(x)
-        topk4 = self.kern4s2(x)
-        midk3 = self.kern3s3p1(x)
-        midk6 = self.kern6s3p1(x)
-        lowk5 = self.kern5s3(x)
+        topk2   =   self.kern2ImagTransformer(self.kern2s1(x))
+        topk4   =   self.kern4ImagTransformer(self.kern4s2(x))
+        midk3   =   self.kern3ImagTransformer(self.kern3s3p1(x))
+        midk6   =   self.kern6ImagTransformer(self.kern6s3p1(x))
+        lowk5   =   self.kern5ImagTransformer(self.kern5s3p1(x))
 
-
-        # LSTM Outputs
+        print(f"topk2 Shape: {topk2.shape}")
+        print(f"topk4 Shape: {topk4.shape}")
+        print(f"midk3 Shape: {midk3.shape}")
+        print(f"midk6 Shape: {midk6.shape}")
+        print(f"lowk5 Shape: {lowk5.shape}")
+        # 16,300,4096 into LSTM into Outputs
         upp_outputs, _ = self.uppLSTM(topk2.transpose(1, 2) + topk4.transpose(1, 2))
         mid_outputs, _ = self.midLSTM(midk3.transpose(1, 2) + midk6.transpose(1, 2))
         low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
@@ -106,17 +112,14 @@ class   cnnToLSTMCustom(nn.Module):
 
 
     def kern2ImagTransformer(self,  input_tensor):
-        # Original tensor of shape (N, 300, 2047)
-        #batch_size,300,2047
-        N, seq_len, num_filters = self.batch_size, 300, 2047  # Example sizes
-        output_tensor=input_tensor.to(dtype=torch.complex64)
-        #input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+        #batch_size,300,2047   k2s1
+        N, seq_len, num_filters = self.batch_size, 300, 2047
         ## Create index mapping for placement
         #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
         #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
         # Create the output tensor
-        #output_tensor = torch.zeros(N, seq_len, 4096)
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
 
         # Assign values
         #output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
@@ -128,16 +131,15 @@ class   cnnToLSTMCustom(nn.Module):
         for i in range(num_filters):
             #[orig,overlap_back]
             # For each filter, map to positions 2i+1 and 2i+2
+            print(f"output_tensor: {output_tensor.shape} vs {input_tensor.shape}")
             output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
             output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
-        print(output_tensor.shape)  # Should be (N, 300, 4096)
+        print(f"output_tensor shape: {output_tensor.shape}")  # Should be (N, 300, 4096)
         return output_tensor
 
     def kern4ImagTransformer(self,input_tensor):
-        # Original tensor of shape (N, 300, 1023)
-        #batch_size,300,4096/2+1
-
+        #batch_size,300,1023  k4s2
         N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
@@ -152,52 +154,51 @@ class   cnnToLSTMCustom(nn.Module):
             output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
         """
         return output_tensor
-    def kern3Transformer(self,input_tensor):
-        # Original tensor of shape (N, 300, 684)
-        #batch_size,300,4096/3+1
+    def kern3ImagTransformer(self,input_tensor):
+        #batch_size,300,684     k3s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
-
-        #values for the outlier 0 filter
-        output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
+        #[][][,1]
+        #[,3][,5][,7]
+        #[][][]
+        #[][][]
+        # clip off the first filter at index 0
+        #output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
         for i in range(1, 683):
             indices = [6*i-3, 6*i-1, 6*i+1]#4089,4091,4093
             output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
 
-        #values for the outlier 85 filter
-        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
+        #cut off outlier filter at index 683
+#        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
         return output_tensor
     def kern6ImagTransformer(self,input_tensor):
 
         # Original tensor of shape (N, 300, 683)
-        #batch_size,300,2048/3
-
+        #batch_size,300,683 k6s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
         output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
-
+        # [][][,1][2,][4,][6,]
+        # [,3][,5][,7][8,][10,][12,]
+        # [][][][][][]
+        # [][][][][][]
         # Outlier filter 0
-        #output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
         output_tensor[:, :, [1, 2, 4, 6]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
-        # Regular filters 1 to 681
+        # Regular filters 1 to 682
         for i in range(1, 682):#3,5,7, 8 , 10, 12
             indices = [6*i-3, 6*i-1, 6*i+1, 6*i+2, 6*i+4,6*i+6]
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
 #12:58.  1/23/25
         # Outlier filter _4083, _4085, _4087, 4088_, 4090_, 4092_
-        # Outlier filter _4083, _4085, _4087, 4090_, 4092_, _4095 __ __
+        # Outlier filter _4089, _4091, _4093, 4094_, __, __
 
-        output_tensor[:, :, [4087, 4089, 4091, 4092, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
+        output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
         return output_tensor
 
 
     def kern5ImagTransformer(self,input_tensor):
-        """
-        Transform input tensor of shape (N, 300, 86) into (N, 300, 4096)
-        with specified index mapping, making all assigned values imaginary.
-        """
-        # Get dimensions of the input tensor
+        #batch_size,300,682 k5s3p0
         N, embedding_dim, num_filters = self.batch_size, 300, 682
 
         # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
@@ -207,27 +208,18 @@ class   cnnToLSTMCustom(nn.Module):
         output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
 
         #[,1][,3][,5][6,][8,]
-        #[10,][12,][14,][,17][,19]
-        #[,11][,13][,15][16,][18,]   4
-
-        #[,][,][,][,][,]
-
-
-        #[,][2,][4,][,7][,9]
-        #[,][,3][,5][6,][8,]
-        # Step 3: Assign imaginary values for regular filters 1 to 682
-        for i in range(1, 683):
+        #[,7][,9][,11][12,][14,]
+        #[,13] [,15] [,17] [18,] [20,]
+        #[,19][,21][,23][24,][26,]
+        for i in range(1, 682):
             indices = [
-                6 * (i - 1) + 2,
-                6 * (i - 1) + 4,
-                6 * (i - 1) + 7,
-                6 * (i - 1) + 9,
-                6 * (i - 1) + 11
+                6 * (i - 1) + 1,
+                6 * (i - 1) + 3,
+                6 * (i - 1) + 5,
+                6 * (i - 1) + 6,
+                6 * (i - 1) + 8
             ]
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
-
-        # Step 4: Assign imaginary values for outlier filter 683
-        output_tensor[:, :, [4090, 4092, 4095]] = 1j * input_tensor[:, :, 683].unsqueeze(-1)
 
         return output_tensor
 
@@ -414,7 +406,7 @@ pad_idx = vocab["<pad>"]
 pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
 # fix the vocab and use glove pretraining
 print(f"Max idx: {max(vocab.get_stoi().values())}")
-print(pretrained_vectors.shape)
+print(f"pretrained_vectors: {pretrained_vectors.shape}")
 for word, idx in vocab.get_stoi().items():
     if word in glove.stoi:  # Check if word is in GloVe's vocabulary
         # pretrained_vectors[idx] = stoi[word]
