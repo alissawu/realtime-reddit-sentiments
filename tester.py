@@ -4,7 +4,8 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
+from torch.utils.data import DataLoader, Dataset, random_split
+import    torch.utils.checkpoint as checkpoint
 #from dask.dataframe import test_dataframe
 #from more_itertools.more import padded
 #from attr.validators import max_len
@@ -22,7 +23,7 @@ from    collections import  Counter,    OrderedDict
 
 import numpy    as np
 import requests
-
+from itertools  import tee
 #from epoch_test import batch_size, train_loader
 
 
@@ -208,26 +209,27 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         #top k2 k4
         #range(0,256,1)
         self.max_len = max_len
-        self.embed  =   nn.Embedding(vocab_size, embedding_dim)
+        self.embed  =   nn.Embedding(vocab_size, embedding_dim,dtype=torch.float16)
         print(self.embed.weight.data.size())
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
         self.num_components = 512
 
-        self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1) #255 to 2047
-        self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2)#127 to 1023
+        self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1,dtype=torch.float16) #255 to 2047
+        self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2,dtype=torch.float16)#127 to 1023
         #mid k3 k6
-        self.kern3s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=3,stride=3, padding=2)#(2045+2*2)/3+1=684 from 86
-        self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
+        self.kern3s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=3,stride=3, padding=2,dtype=torch.float16)#(2045+2*2)/3+1=684 from 86
+        self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2,dtype=torch.float16)#(2042+2*2)/3+1 = 683 from 85
         #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
+        self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0,dtype=torch.float16)#(2043)/3+1=682  from 84
 
         self.LSTM_hidden    =   1024
-        self.uppLSTM = nn.LSTM(600, 4096, batch_first=True, bidirectional=True)  #300*2 for interleaved
-        self.midLSTM = nn.LSTM(600, 4096, batch_first=True, bidirectional=True)  #300*2 for interleaved
-        self.lowLSTM = nn.LSTM(300, 4096, batch_first=True, bidirectional=True)  #no complex values
-        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
+        self.uppLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #300*2 for interleaved
+        self.midLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #300*2 for interleaved
+
+        self.lowLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #no complex values
+        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float16))
 
         self.fc1    =   nn.Linear(2048,16)
         self.dropout = nn.Dropout(0.25)
@@ -238,43 +240,54 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         x = x.permute(0, 2, 1)
 
         # CNN Layers
-        topk2 = self.kern2ImagTransformer(self.kern2s1(x))
+        topk2 = self.kern2ImagTransformer(self.kern2s1(x))#torch.float16
         topk4 = self.kern4ImagTransformer(self.kern4s2(x))
         midk3 = self.kern3ImagTransformer(self.kern3s3p1(x))
         midk6 = self.kern6ImagTransformer(self.kern6s3p1(x))
         lowk5 = self.kern5ImagTransformer(self.kern5s3(x))
 
         def interleave_complex(complex_tensor):
+
             real_part = complex_tensor.real
             imag_part = complex_tensor.imag
+            print(f"Real Part Shape: {real_part.shape}")
             batch_size, channels, seq_len = real_part.shape
 
             # Create interleaved tensor
-            interleaved = torch.zeros(batch_size, channels * 2, seq_len,
-                                      device=real_part.device,
-                                      dtype=torch.float32)
+            interleaved = torch.zeros(batch_size, channels * 2,seq_len,
+                                      device=real_part.device, dtype=torch.float16)
 
             # Interleave real and imaginary parts
-            interleaved[:, 0::2, :] = real_part
-            interleaved[:, 1::2, :] = imag_part
+            interleaved[:, 0::2,:] = real_part
+            interleaved[:, 1::2,:] = imag_part
             return interleaved
 
         # Process complex combinations with interleaving
-        upper_combined = topk2 + topk4
+
+        upper_combined = torch.tensor(topk2) + torch.tensor(topk4)
         upper_input = interleave_complex(upper_combined).transpose(1, 2)
-
-        mid_combined = midk3 + midk6
+        #16,600,1024
+        mid_combined = torch.tensor(midk3) + torch.tensor(midk6)
         mid_input = interleave_complex(mid_combined).transpose(1, 2)
+        #16,600,1024
 
+        low_input = interleave_complex(torch.tensor(lowk5)).transpose(1, 2)
         # Process through LSTMs
-        upp_outputs, _ = self.uppLSTM(upper_input)
-        mid_outputs, _ = self.midLSTM(mid_input)
-        low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
+        print(f"LSTM INPUT SHAPES: {upper_input.shape, mid_input.shape, low_input.shape}")
+        #upp_out, _ = checkpoint.checkpoint(self._forward_lstm, self.uppLSTM, upper_input)
+        #mid_out, _ = checkpoint.checkpoint(self._forward_lstm, self.midLSTM, mid_input)
+        #low_out, _ = checkpoint.checkpoint(self._forward_lstm, self.lowLSTM, low_input)
+        upp_out =   self.uppLSTM(upper_input)
+        mid_out = self.midLSTM(mid_input)
+        low_out = self.lowLSTM(low_input)
 
-        def apply_pca(self, features):
+        def apply_pca(self, features,num_comp,chunk_size):
             mean = torch.mean(features, dim=0, keepdim=True)
             centered_data = features - mean
-
+            N,D = centered_data.shape
+            U_total,S_total,Vt_total = [],[],[]#torch.svd(centered_data)
+            for start   in range(0,N,chunk_size):
+                end =   min(start + chunk_size,N)
             cov_matrix = torch.matmul(centered_data.T, centered_data) / (features.shape[0] - 1)
 
             eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
@@ -304,11 +317,10 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
             top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
 
             return features @ top_k_eigvecs
-
         # Apply PLA to LSTM outputs
-        upp_features = apply_pla(upp_outputs)
-        mid_features = apply_pla(mid_outputs)
-        low_features = apply_pla(low_outputs)
+        upp_features = apply_pla(upp_out)
+        mid_features = apply_pla(mid_out)
+        low_features = apply_pla(low_out)
 
         # Combine PLA-reduced features
         fused = upp_features + mid_features + low_features
@@ -321,8 +333,8 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
 
         # noinspection PyUnreachableCode
 
-
-
+    def _forward_lstm(self,lstm,x):
+        return  lstm(x)
 
 
     def kern2ImagTransformer(self,  input_tensor):
@@ -333,7 +345,7 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
         # Create the output tensor
-        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.float16)
 
         for i in range(num_filters):
             #[orig,overlap_back]
@@ -341,24 +353,30 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
             output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
             output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
-        return output_tensor
+
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k2 Odds: {odds.shape}")
+        return  odds
     def kern4ImagTransformer(self,input_tensor):
         #batch_size,300,1023  k4s2
         N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
+        input_tensor=input_tensor.to(dtype=torch.complex32)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex32)
         for i in range(num_filters):
             # Compute target indices for filter i
             indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
             # Assign the input filter values as imaginary numbers to the output at the computed indices
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
 
-        return output_tensor
+        # split into odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k4 Odds: {odds.shape}")
+        return  odds
     def kern3ImagTransformer(self,input_tensor):
         #batch_size,300,684     k3s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
+        input_tensor=input_tensor.to(dtype=torch.complex32)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex32)
         #[][][,1]
         #[,3][,5][,7]
         #[][][]
@@ -371,14 +389,16 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
 
         #cut off outlier filter at index 683
 #        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
-        return output_tensor
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k3 Odds: {odds.shape}")
+        return  odds
     def kern6ImagTransformer(self,input_tensor):
 
         # Original tensor of shape (N, 300, 683)
         #batch_size,300,683 k6s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        input_tensor=input_tensor.to(dtype=torch.complex32)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex32)
         # [][][,1][2,][4,][6,]
         # [,3][,5][,7][8,][10,][12,]
         # [][][][][][]
@@ -394,13 +414,17 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         # Outlier filter _4089, _4091, _4093, 4094_, __, __
 
         output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
-        return output_tensor
+
+        #split to odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k6 Odds: {odds.shape}")
+        return  odds
     def kern5ImagTransformer(self,input_tensor):
         #batch_size,300,682 k5s3p0
         N, embedding_dim, num_filters = self.batch_size, 300, 682
 
         # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
-        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex32)
 
         # Step 2: Assign imaginary values for outlier filter 0
         output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
@@ -419,8 +443,10 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
             ]
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
 
-        return output_tensor
-
+#split to odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k5 Odds: {odds.shape}")
+        return  odds
 
 
 def process_dataset(combined_dataset=Dataset):
@@ -443,13 +469,13 @@ def process_dataset(combined_dataset=Dataset):
     def label_pipeline(label):
         if isinstance(label, str):
             if label == "pos":
-                return torch.tensor(1, dtype=torch.float)
+                return torch.tensor(1, dtype=torch.float16)
             elif label == "neg":
-                return torch.tensor(0, dtype=torch.float)
+                return torch.tensor(0, dtype=torch.float16)
             else:
                 raise ValueError(f"Unexpected label: {label}")
         elif isinstance(label, int) or label.isdigit():
-            return torch.tensor(float(int(label) - 1), dtype=torch.float)
+            return torch.tensor(float(int(label) - 1), dtype=torch.float16)
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
@@ -606,7 +632,7 @@ print(f"pretrained_vectors: {pretrained_vectors.shape}")
 for word, idx in vocab.get_stoi().items():
     if word in glove.stoi:  # Check if word is in GloVe's vocabulary
         # pretrained_vectors[idx] = stoi[word]
-        pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float)
+        pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float16)
     elif word == "<pad>":  # Padding vector (optional, all zeros by default)
         pretrained_vectors[idx] = torch.zeros(embedding_dim)
     else:  # For OOV words (e.g., "<unk>")
@@ -660,9 +686,9 @@ def collate_batch(batch):
     return labels, padded_texts#, text_lengths
 
 
-dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch)
-dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch)
-dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch)
+dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
 # inst_test = IMDB(split="test")
 
 # this one
