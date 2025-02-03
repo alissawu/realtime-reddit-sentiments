@@ -286,47 +286,30 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         upp_out =   self.uppLSTM(upper_input)
         mid_out = self.midLSTM(mid_input)
         low_out = self.lowLSTM(low_input)
+        #16,2048,600
 
-        def apply_pca(self, features,num_comp,chunk_size):
-            mean = torch.mean(features, dim=0, keepdim=True)
-            centered_data = features - mean
-            N,D = centered_data.shape
+        def apply_pca(self, features,num_comp=300,chunk_size=512):
+            #feat = features - mean
+            features_2d =   features.view(features.shape[0]*features.shape[1], 600)
+            N,D = features_2d.shape
+            mean    =   features.mean(dim=0,keepdims=True)
+            centered    =   features - mean
             U_total,S_total,Vt_total = [],[],[]#torch.svd(centered_data)
-            for start   in range(0,N,chunk_size):
-                end =   min(start + chunk_size,N)
-            cov_matrix = torch.matmul(centered_data.T, centered_data) / (features.shape[0] - 1)
+            device  =   features.device
+            dtype   =   features.dtype
+
+            cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
 
             eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
 
             sorted_indices = torch.argsort(eigenvalues, descending=True)
             top_eigenvectors = eigenvectors[:, sorted_indices[:self.num_components]]
 
-            return torch.matmul(centered_data, top_eigenvectors)
-        def apply_pla(features):
-            features = features.mean(dim=1)
+            return torch.matmul(centered, top_eigenvectors)
 
-            chunk_size = 1024
-            if features.shape[1] > chunk_size:
-                cov_matrix = torch.zeros(features.shape[1], features.shape[1],
-                                         device=features.device)
-                for i in range(0, features.shape[1], chunk_size):
-                    end = min(i + chunk_size, features.shape[1])
-                    chunk = features[:, i:end]
-                    cov_matrix[i:end] = chunk.T @ chunk
-            else:
-                cov_matrix = features.T @ features
-
-            eigvals, eigvecs = torch.linalg.eigh(cov_matrix)
-
-            # Sort and select top components
-            sorted_indices = torch.argsort(eigvals, descending=True)
-            top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
-
-            return features @ top_k_eigvecs
-        # Apply PLA to LSTM outputs
-        upp_features = apply_pla(upp_out)
-        mid_features = apply_pla(mid_out)
-        low_features = apply_pla(low_out)
+        upp_features = apply_pca(upp_out)
+        mid_features = apply_pca(mid_out)
+        low_features = apply_pca(low_out)
 
         # Combine PLA-reduced features
         fused = upp_features + mid_features + low_features
