@@ -265,13 +265,19 @@ class   cnnToLSTMCustomInterleaving(nn.Module):
         # Process complex combinations with interleaving
 
         upper_combined = torch.tensor(topk2) + torch.tensor(topk4)
-        upper_input = interleave_complex(upper_combined).transpose(1, 2)
+        #upper_input = interleave_complex(upper_combined).transpose(1, 2)
+        upper_input = interleave_complex(upper_combined.clone().detach().requires_grad_(True)).transpose(1, 2)
+
         #16,600,1024
         mid_combined = torch.tensor(midk3) + torch.tensor(midk6)
-        mid_input = interleave_complex(mid_combined).transpose(1, 2)
+        #mid_input = interleave_complex(mid_combined).transpose(1, 2)
+        mid_input = interleave_complex(mid_combined.clone().detach().requires_grad_(True)).transpose(1, 2)
+
         #16,600,1024
 
-        low_input = interleave_complex(torch.tensor(lowk5)).transpose(1, 2)
+        #low_input = interleave_complex(torch.tensor(lowk5)).transpose(1, 2)
+        low_input = interleave_complex(lowk5.clone().detach().requires_grad_(True)).transpose(1, 2)
+
         # Process through LSTMs
         print(f"LSTM INPUT SHAPES: {upper_input.shape, mid_input.shape, low_input.shape}")
         #upp_out, _ = checkpoint.checkpoint(self._forward_lstm, self.uppLSTM, upper_input)
