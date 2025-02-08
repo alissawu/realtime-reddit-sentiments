@@ -445,6 +445,7 @@ def process_dataset(combined_dataset=Dataset):
     val_size    = int(total_size * 0.2)
     test_size = int(total_size * 0.1)
     tokenizer = get_tokenizer("basic_english")
+#tokenizer
 
     def yield_tokens(data_iter):
         for label, text in data_iter:
@@ -500,8 +501,8 @@ epoch_count = 7
 learning_rate = 0.004
 min_lr = 0.0005
 
-token_retriever = get_tokenizer("basic_english")
-
+token_retriever = get_tokenizer("spacy")
+#get t
 
 def yield_tokens(data_iter):
     for _, text in data_iter:
