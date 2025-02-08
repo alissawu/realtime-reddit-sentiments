@@ -35,10 +35,8 @@ def process_dataset(combined_dataset, val_split=0.2, test_split=0.1):
 
 
 def main():
-    # Load IMDB dataset from Hugging Face
     imdb_dataset = load_dataset('stanfordnlp/imdb')
 
-    # Prepare tokenizer (you can choose a different one if needed)
     tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
 
     # Wrap datasets
