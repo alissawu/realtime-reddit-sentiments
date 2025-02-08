@@ -19,6 +19,25 @@ class RedoneTupleDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
+class   TextPipeline:
+    def __init__(self,glove_embeddings):
+        self.vocab = glove_embeddings.stoi
+        self.unk_token_idx  =   self.vocab['<unk>']
+        self.max_length = 2048
+    def __call__(self, text):
+        tokens = [self.vocab.get(word.lower(), self.unk_token_idx)
+                  for word in text.split()][:self.max_length]
+
+        return tokens
+
+class   LabelPipeline:
+    def __init__(self, num_classes=2):
+        self.num_classes = num_classes
+    def __call__(self, label:   int):
+        return torch.tensor(label,dtype=torch.int)
+    def one_hot(self, label):
+        return torch.nn.functional.one_hot(label, self.num_classes)
+
 
 def process_dataset(combined_dataset, val_split=0.2, test_split=0.1):
     total_size = len(combined_dataset)
@@ -32,6 +51,16 @@ def process_dataset(combined_dataset, val_split=0.2, test_split=0.1):
     )
 
     return (train_dSet, val_dSet, test_dSet)
+
+token_retriever = get_tokenizer("basic_english")
+def yield_tokens(data_iter):
+    for _, text in data_iter:
+        if isinstance(text, str):  # If `text` is raw text
+            yield token_retriever(text)
+        elif isinstance(text, list):  # If `text` is already tokenized
+            yield text  # Use it directly without tokenizing again
+        else:
+            raise ValueError("Unexpected text format. Expected string or list of tokens.")
 
 
 def main():
@@ -64,7 +93,8 @@ def main():
     # '<unk>' and '<pad>'
     print(dir(glove))
 
-    vocab   =   
+    #RETURN HERRREEE
+    #vocab   =
     pad_idx = vocab['<pad']
 
 
