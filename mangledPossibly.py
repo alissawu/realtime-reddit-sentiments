@@ -7,6 +7,9 @@ from torchtext.vocab import GloVe
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
+from tester import padding_type
+
+
 class RedoneTupleDataset(Dataset):
     def __init__(self, original_dataset):
         self.data = []
@@ -23,13 +26,15 @@ class   TextPipeline:
     def __init__(self,glove_embeddings):
         self.vocab = glove_embeddings.stoi
         self.unk_token_idx  =   self.vocab['<unk>']
+        self.pad_token_idx = self.vocab['<pad>']
         self.max_length = 2048
     def __call__(self, text):
         tokens = [self.vocab.get(word.lower(), self.unk_token_idx)
                   for word in text.split()][:self.max_length]
-
-        return tokens
-
+        return torch.tensors(tokens)
+    def pad_sequence(self,tokens: torch.Tensor) ->torch.Tensor:
+        if len(tokens) < self.max_length:
+            padding =   torch.full
 class   LabelPipeline:
     def __init__(self, num_classes=2):
         self.num_classes = num_classes
