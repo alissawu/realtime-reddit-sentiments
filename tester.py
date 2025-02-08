@@ -501,7 +501,7 @@ epoch_count = 7
 learning_rate = 0.004
 min_lr = 0.0005
 
-token_retriever = get_tokenizer("spacy")
+token_retriever = get_tokenizer("basic_english")
 #get t
 
 def yield_tokens(data_iter):
