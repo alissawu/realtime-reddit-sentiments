@@ -556,7 +556,6 @@ def filter_large_samples(dataset, tokenizer, max_tokens=2048):
     return filtered_data
 
 # Applying the filtering function to each dataset
-from torchtext.data.utils import get_tokenizer
 
 tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
 train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
