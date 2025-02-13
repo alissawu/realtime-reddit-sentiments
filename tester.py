@@ -203,121 +203,200 @@ class   cnnToLSTMCustom(nn.Module):
         return output_tensor
 
 
-class   cnnToLSTMCustomInterleaving(nn.Module):
-    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int , max_len:    int):
-        super(cnnToLSTMCustomInterleaving,self).__init__()
-        #top k2 k4
-        #range(0,256,1)
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class CNNToLSTMCustomInterleaving(nn.Module):
+    def __init__(self, vocab_size: int, embedding_dim: int, pretrained_vecs, batch_size: int, max_len: int,
+                 device=None):
+        super().__init__()
         self.max_len = max_len
-        self.embed  =   nn.Embedding(vocab_size, embedding_dim,dtype=torch.float16)
-        print(self.embed.weight.data.size())
-        self.embed.weight.data.copy_(pretrained_vecs)
-        self.embed.weight.requires_grad = False
         self.batch_size = batch_size
         self.num_components = 512
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1,dtype=torch.float16) #255 to 2047
-        self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2,dtype=torch.float16)#127 to 1023
-        #mid k3 k6
-        self.kern3s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=3,stride=3, padding=2,dtype=torch.float16)#(2045+2*2)/3+1=684 from 86
-        self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2,dtype=torch.float16)#(2042+2*2)/3+1 = 683 from 85
-        #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0,dtype=torch.float16)#(2043)/3+1=682  from 84
+        # Initialize embedding layer with float16 on correct device
+        self.embed = nn.Embedding(vocab_size, embedding_dim, dtype=torch.float16).to(self.device)
+        pretrained_vecs = pretrained_vecs.to(self.device, dtype=torch.float16)
+        print(f"Embedding weight size: {self.embed.weight.data.size()}")
+        self.embed.weight.data.copy_(pretrained_vecs)
+        self.embed.weight.requires_grad = False
 
-        self.LSTM_hidden    =   1024
-        self.uppLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #300*2 for interleaved
-        self.midLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #300*2 for interleaved
+        # CNN layers with float16
+        self.kern2s1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=2,
+            stride=1,
+            dtype=torch.float16
+        ).to(self.device)
 
-        self.lowLSTM = nn.LSTM(600, 2048, batch_first=True, bidirectional=True,dtype=torch.float16)  #no complex values
-        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float16))
+        self.kern4s2 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=4,
+            stride=2,
+            dtype=torch.float16
+        ).to(self.device)
 
-        self.fc1    =   nn.Linear(2048,16)
+        self.kern3s3p1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=3,
+            stride=3,
+            padding=2,
+            dtype=torch.float16
+        ).to(self.device)
+
+        self.kern6s3p1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=6,
+            stride=3,
+            padding=2,
+            dtype=torch.float16
+        ).to(self.device)
+
+        self.kern5s3 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=5,
+            stride=3,
+            padding=0,
+            dtype=torch.float16
+        ).to(self.device)
+
+        # LSTM layers with float16
+        lstm_hidden = 2048
+        lstm_input_size = embedding_dim * 2  # for interleaved input
+        self.uppLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,
+            bidirectional=True,
+            dtype=torch.float16
+        ).to(self.device)
+
+        self.midLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,
+            bidirectional=True,
+            dtype=torch.float16
+        ).to(self.device)
+
+        self.lowLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,
+            bidirectional=True,
+            dtype=torch.float16
+        ).to(self.device)
+
+        # Weights parameter with float16
+        self.weights = nn.Parameter(
+            torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float16, device=self.device)
+        )
+
+        # Fully connected layers
+        self.fc1 = nn.Linear(lstm_hidden * 2, 16, dtype=torch.float16).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
-        self.fc2 = nn.Linear(32,2)
+        self.fc2 = nn.Linear(16, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
+
+    def kern2ImagTransformer(self, x):
+        return torch.complex(x, torch.zeros_like(x, device=self.device))
+
+    def kern4ImagTransformer(self, x):
+        return torch.complex(x, torch.zeros_like(x, device=self.device))
+
+    def kern3ImagTransformer(self, x):
+        return torch.complex(x, torch.zeros_like(x, device=self.device))
+
+    def kern6ImagTransformer(self, x):
+        return torch.complex(x, torch.zeros_like(x, device=self.device))
+
+    def kern5ImagTransformer(self, x):
+        return torch.complex(x, torch.zeros_like(x, device=self.device))
 
     def forward(self, x):
+        # Ensure input is on correct device
+        x = x.to(self.device)
+
+        # Embedding
         x = self.embed(x)
         x = x.permute(0, 2, 1)
 
         # CNN Layers
-        topk2 = self.kern2ImagTransformer(self.kern2s1(x))#torch.float16
+        topk2 = self.kern2ImagTransformer(self.kern2s1(x))
         topk4 = self.kern4ImagTransformer(self.kern4s2(x))
         midk3 = self.kern3ImagTransformer(self.kern3s3p1(x))
         midk6 = self.kern6ImagTransformer(self.kern6s3p1(x))
         lowk5 = self.kern5ImagTransformer(self.kern5s3(x))
 
         def interleave_complex(complex_tensor):
-
             real_part = complex_tensor.real
             imag_part = complex_tensor.imag
-            print(f"Real Part Shape: {real_part.shape}")
             batch_size, channels, seq_len = real_part.shape
 
-            # Create interleaved tensor
-            interleaved = torch.zeros(batch_size, channels * 2,seq_len,
-                                      device=real_part.device, dtype=torch.float16)
+            interleaved = torch.zeros(
+                batch_size,
+                channels * 2,
+                seq_len,
+                device=self.device,
+                dtype=torch.float16
+            )
 
-            # Interleave real and imaginary parts
-            interleaved[:, 0::2,:] = real_part
-            interleaved[:, 1::2,:] = imag_part
+            interleaved[:, 0::2, :] = real_part
+            interleaved[:, 1::2, :] = imag_part
             return interleaved
 
-        # Process complex combinations with interleaving
+        # Process complex combinations with interleaving and gradient tracking
+        upper_combined = topk2 + topk4
+        upper_input = interleave_complex(upper_combined).transpose(1, 2)
 
-        upper_combined = torch.tensor(topk2) + torch.tensor(topk4)
-        #upper_input = interleave_complex(upper_combined).transpose(1, 2)
-        upper_input = interleave_complex(upper_combined.clone().detach().requires_grad_(True)).transpose(1, 2)
+        mid_combined = midk3 + midk6
+        mid_input = interleave_complex(mid_combined).transpose(1, 2)
 
-        #16,600,1024
-        mid_combined = torch.tensor(midk3) + torch.tensor(midk6)
-        #mid_input = interleave_complex(mid_combined).transpose(1, 2)
-        mid_input = interleave_complex(mid_combined.clone().detach().requires_grad_(True)).transpose(1, 2)
-
-        #16,600,1024
-
-        #low_input = interleave_complex(torch.tensor(lowk5)).transpose(1, 2)
-        low_input = interleave_complex(lowk5.clone().detach().requires_grad_(True)).transpose(1, 2)
+        low_input = interleave_complex(lowk5).transpose(1, 2)
 
         # Process through LSTMs
-        print(f"LSTM INPUT SHAPES: {upper_input.shape, mid_input.shape, low_input.shape}")
-        #upp_out, _ = checkpoint.checkpoint(self._forward_lstm, self.uppLSTM, upper_input)
-        #mid_out, _ = checkpoint.checkpoint(self._forward_lstm, self.midLSTM, mid_input)
-        #low_out, _ = checkpoint.checkpoint(self._forward_lstm, self.lowLSTM, low_input)
-        upp_out =   self.uppLSTM(upper_input)
-        mid_out = self.midLSTM(mid_input)
-        low_out = self.lowLSTM(low_input)
-        #16,2048,600
+        upp_out, _ = self.uppLSTM(upper_input)
+        mid_out, _ = self.midLSTM(mid_input)
+        low_out, _ = self.lowLSTM(low_input)
 
-        def apply_pca(self, features,num_comp=300,chunk_size=512):
-            #feat = features - mean
-            features_2d =   features.view(features.shape[0]*features.shape[1], 600)
-            N,D = features_2d.shape
-            mean    =   features.mean(dim=0,keepdims=True)
-            centered    =   features - mean
-            U_total,S_total,Vt_total = [],[],[]#torch.svd(centered_data)
-            device  =   features.device
-            dtype   =   features.dtype
+        def apply_pca(self, features):
+            # Center the data
+            mean = features.mean(dim=0, keepdim=True)
+            centered = features - mean
 
+            # Compute covariance matrix
             cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
 
+            # Compute eigenvalues and eigenvectors
             eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
 
+            # Sort and select top components
             sorted_indices = torch.argsort(eigenvalues, descending=True)
             top_eigenvectors = eigenvectors[:, sorted_indices[:self.num_components]]
 
+            # Project the data
             return torch.matmul(centered, top_eigenvectors)
 
-        upp_features = apply_pca(upp_out)
-        mid_features = apply_pca(mid_out)
-        low_features = apply_pca(low_out)
+        # Apply PCA to LSTM outputs
+        upp_features = self.apply_pca(upp_out)
+        mid_features = self.apply_pca(mid_out)
+        low_features = self.apply_pca(low_out)
 
-        # Combine PLA-reduced features
+        # Combine features
         fused = upp_features + mid_features + low_features
 
-        # Fully Connected Layers
+        # Final layers
         swisher = F.silu(self.fc1(fused))
         dropout = self.dropout(swisher)
         final_outputs = F.softmax(self.fc2(dropout), dim=1)
+
         return final_outputs
 
         # noinspection PyUnreachableCode
