@@ -8,12 +8,14 @@ from torch.utils.data import DataLoader, Dataset, random_split
 import    torch.utils.checkpoint as checkpoint
 #from dask.dataframe import test_dataframe
 #from more_itertools.more import padded
-#from attr.validators import max_len
+
 #from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
-from torchtext.datasets import IMDB
+
 from torchtext.data.utils import get_tokenizer
+from torch.utils.data import Dataset, ConcatDataset
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
+from datasets import load_dataset
 from torch.utils.data import ConcatDataset
 
 from tqdm import tqdm
@@ -201,11 +203,6 @@ class   cnnToLSTMCustom(nn.Module):
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
 
         return output_tensor
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 class CNNToLSTMCustomInterleaving(nn.Module):
@@ -527,7 +524,7 @@ def process_dataset(combined_dataset=Dataset):
 #tokenizer
 
     def yield_tokens(data_iter):
-        for label, text in data_iter:
+        for text, label in data_iter:
             yield tokenizer(text)
 
     def text_pipeline(text):
@@ -536,6 +533,7 @@ def process_dataset(combined_dataset=Dataset):
         #return torch.tensor(tokenizer(text), dtype=torch.int64)
 
     def label_pipeline(label):
+        print(label)
         if isinstance(label, str):
             if label == "pos":
                 return torch.tensor(1, dtype=torch.float16)
@@ -549,10 +547,12 @@ def process_dataset(combined_dataset=Dataset):
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
         print(f"Max Len:     {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
+        print(raw_data_split[0])
+        print(raw_data_split[1])
         #print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
         print(f"# of too big:{sum(len(text_pipeline(text)) > 2048 for _, text in raw_data_split)}")
-        return  [(label_pipeline(label),text_pipeline(text))
-                 for label, text in raw_data_split
+        return  [(text_pipeline(text),label_pipeline(label))
+                 for text, label in raw_data_split
         ]
 
     # Create train and test datasets with random split
@@ -566,15 +566,12 @@ def process_dataset(combined_dataset=Dataset):
 
 
 
-# params
-max_len = 2048#realistitcally 2752
+# Rest of your code remains the same
+max_len = 2048
 padding_type = 'post'
-vocab_size = 130000#to be changed later
+vocab_size = 130000
 embedding_dim = 300
-#max token
 
-
-# hypers
 batch_size = 16
 epoch_count = 7
 learning_rate = 0.004
@@ -584,7 +581,7 @@ token_retriever = get_tokenizer("basic_english")
 #get t
 
 def yield_tokens(data_iter):
-    for _, text in data_iter:
+    for text,label in data_iter:
         if isinstance(text, str):  # If `text` is raw text
             yield token_retriever(text)
         elif isinstance(text, list):  # If `text` is already tokenized
@@ -593,29 +590,54 @@ def yield_tokens(data_iter):
             raise ValueError("Unexpected text format. Expected string or list of tokens.")
 
 
-# Custom iterwrapper
-class redoneTupleDataset(Dataset):
-    def __init__(self, data):
-        self.data = list(data)  # Convert iterable to a list for indexing
+class RedoneTupleDataset(Dataset):
+    def __init__(self, original_dataset):
+        self.data = []
+        for text, label in original_dataset:  # torchtext IMDB returns (label, text) tuples
+            self.data.append((text, label))  # Swap order to match your expected format
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        label, text = self.data[idx]
-        return label, text
+        return self.data[idx]
 
 
 # Convert the datasets into PyTorch Dataset objects
-iter1 = IMDB(root=".data", split='train')
-iter2 = IMDB(root=".data", split='test')
-iter1_wrapped = redoneTupleDataset(iter1)
-iter2_wrapped = redoneTupleDataset(iter2)
 
-glove = GloVe(name="6B", dim=embedding_dim)
+iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
+iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
+# Create wrapped datasets
+
+train_wrapped = RedoneTupleDataset(iter1)
+test_wrapped = RedoneTupleDataset(iter2)
+combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
+
+iter1_wrapped = RedoneTupleDataset(iter1)
+iter2_wrapped = RedoneTupleDataset(iter2)
+
+glove = GloVe(name='6B', dim=embedding_dim)
+
 glove_path = os.path.expanduser(
     "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
 GloVe_itos = []
+# Create vocabulary mapping
+vocab = {word: idx for idx, word in enumerate(glove.itos)}
+
+if '<pad>' not in vocab:
+    vocab['<pad>'] = len(vocab)
+if '<unk>' not in vocab:
+    vocab['<unk>'] = len(vocab)
+
+pad_idx = vocab['<pad>']
+
+train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
+
+print(f"Train dataset size: {len(train_dSet)}")
+print(f"Validation dataset size: {len(val_dSet)}")
+print(f"Test dataset size: {len(test_dSet)}")
+
+
 
 # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
 combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
@@ -628,7 +650,7 @@ combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
 def filter_large_samples(dataset, tokenizer, max_tokens=2048):
     filtered_data = []
     for item in dataset:
-        label,text = item  # Assuming each item is a (text, label) tuple
+        text, label = item  # Assuming each item is a (text, label) tuple
         tokenized_text = tokenizer(text)  # Tokenize the text
         #print(tokenized_text)
         if len(tokenized_text) <= max_tokens:
@@ -643,15 +665,15 @@ val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
 test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
 
 # Wrap the filtered datasets into PyTorch Dataset objects
-train_dSet = redoneTupleDataset(train_dSet_filtered)
-val_dSet = redoneTupleDataset(val_dSet_filtered)
-test_dSet = redoneTupleDataset(test_dSet_filtered)
+train_dSet = RedoneTupleDataset(train_dSet_filtered)
+val_dSet = RedoneTupleDataset(val_dSet_filtered)
+test_dSet = RedoneTupleDataset(test_dSet_filtered)
 
 
 #filter out samples with text lengths greater than 2048 tokens
 def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
 
-    return [(label, text) for label, text in data if len(text) <= max_tokens]
+    return [(text, label) for text, label in data if len(text) <= max_tokens]
 
 
 train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
@@ -763,7 +785,7 @@ dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffl
 all_texts = []
 all_labels = []
 
-for label_batch,    text_batch in dLoad_train:
+for text_batch,label_batch in dLoad_train:
     all_texts.append(text_batch)
     all_labels.append(label_batch)
 # TRIAL PIECE
@@ -791,7 +813,7 @@ print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
 
 # Training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = cnnToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
+model = CNNToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
                                     batch_size, int(2048)).to(device)
 criterion = nn.BCELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
@@ -803,7 +825,7 @@ for epoch in range(epoch_count):
     epoch_loss = 0
     progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
 
-    for batch_idx, (labels, inputs) in enumerate(progress_bar):
+    for batch_idx, (inputs,labels) in enumerate(progress_bar):
         inputs, labels = inputs.to(device), labels.to(device)
 
         outputs = model(inputs)
