@@ -92,13 +92,12 @@ from torch.utils.data import Dataset, ConcatDataset
 
 def main():
     # Load IMDB dataset using torchtext
-    train_iter = IMDB(split='train')
-    test_iter = IMDB(split='test')
+    #train_iter = IMDB(split='train')
+    #test_iter = IMDB(split='test')
 
     # Convert iterators to lists for easier handling
-    train_data = list(train_iter)
-    test_data = list(test_iter)
-
+    train_data    =   list(load_dataset('stanfordnlp/imdb',split='train'))
+    test_data = list(load_dataset('stanfordnlp/imdb',split='test'))
     # Create wrapped datasets
     train_wrapped = RedoneTupleDataset(train_data)
     test_wrapped = RedoneTupleDataset(test_data)
