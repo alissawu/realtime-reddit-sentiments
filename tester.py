@@ -303,20 +303,107 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.dropout = nn.Dropout(0.25)
         self.fc2 = nn.Linear(16, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
 
-    def kern2ImagTransformer(self, x):
-        return torch.complex(x, torch.zeros_like(x, device=self.device))
+    def kern2ImagTransformer(self, input_tensor):
+        # batch_size,300,2047   k2s1
+        N, seq_len, num_filters = self.batch_size, 300, 2047
+        ## Create index mapping for placement
+        # indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
+        # indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
-    def kern4ImagTransformer(self, x):
-        return torch.complex(x, torch.zeros_like(x, device=self.device))
+        # Create the output tensor
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
 
-    def kern3ImagTransformer(self, x):
-        return torch.complex(x, torch.zeros_like(x, device=self.device))
+        for i in range(num_filters):
+            # [orig,overlap_back]
+            # For each filter, map to positions 2i+1 and 2i+2
+            output_tensor[:, :, 2 * i + 1] = input_tensor[:, :, i]
+            output_tensor[:, :, 2 * i + 2] = input_tensor[:, :, i]
 
-    def kern6ImagTransformer(self, x):
-        return torch.complex(x, torch.zeros_like(x, device=self.device))
+        return output_tensor
 
-    def kern5ImagTransformer(self, x):
-        return torch.complex(x, torch.zeros_like(x, device=self.device))
+    def kern4ImagTransformer(self, input_tensor):
+        # batch_size,300,1023  k4s2
+        N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        for i in range(num_filters):
+            # Compute target indices for filter i
+            indices = [4 * i + 1, 4 * i + 3, 4 * i + 4, 4 * i + 6]
+            # Assign the input filter values as imaginary numbers to the output at the computed indices
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
+
+    def kern3ImagTransformer(self, input_tensor):
+        # batch_size,300,684     k3s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1]
+        # [,3][,5][,7]
+        # [][][]
+        # [][][]
+        # clip off the first filter at index 0
+        # output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
+        for i in range(1, 683):
+            indices = [6 * i - 3, 6 * i - 1, 6 * i + 1]  # 4089,4091,4093
+            output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
+
+        # cut off outlier filter at index 683
+        #        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
+        return output_tensor
+
+    def kern6ImagTransformer(self, input_tensor):
+
+        # Original tensor of shape (N, 300, 683)
+        # batch_size,300,683 k6s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1][2,][4,][6,]
+        # [,3][,5][,7][8,][10,][12,]
+        # [][][][][][]
+        # [][][][][][]
+        # Outlier filter 0
+        output_tensor[:, :, [1, 2, 4, 6]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+        # Regular filters 1 to 682
+        for i in range(1, 682):  # 3,5,7, 8 , 10, 12
+            indices = [6 * i - 3, 6 * i - 1, 6 * i + 1, 6 * i + 2, 6 * i + 4, 6 * i + 6]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1,
+                                                                                           6)  # Make values imaginary
+        # 12:58.  1/23/25
+        # Outlier filter _4083, _4085, _4087, 4088_, 4090_, 4092_
+        # Outlier filter _4089, _4091, _4093, 4094_, __, __
+
+        output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(
+            -1)  # Make values imaginary
+        return output_tensor
+
+    def kern5ImagTransformer(self, input_tensor):
+        # batch_size,300,682 k5s3p0
+        N, embedding_dim, num_filters = self.batch_size, 300, 682
+
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
+
+        # Step 2: Assign imaginary values for outlier filter 0
+        output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+
+        # [,1][,3][,5][6,][8,]
+        # [,7][,9][,11][12,][14,]
+        # [,13] [,15] [,17] [18,] [20,]
+        # [,19][,21][,23][24,][26,]
+        for i in range(1, 682):
+            indices = [
+                6 * (i - 1) + 1,
+                6 * (i - 1) + 3,
+                6 * (i - 1) + 5,
+                6 * (i - 1) + 6,
+                6 * (i - 1) + 8
+            ]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
 
     def forward(self, x):
         # Ensure input is on correct device
@@ -346,7 +433,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                 device=self.device,
                 dtype=torch.float16
             )
-
+            print("reals and imag")
             interleaved[:, 0::2, :] = real_part
             interleaved[:, 1::2, :] = imag_part
             return interleaved
@@ -359,12 +446,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         mid_input = interleave_complex(mid_combined).transpose(1, 2)
 
         low_input = interleave_complex(lowk5).transpose(1, 2)
-
+        print("Layers Done into LSTM")
         # Process through LSTMs
         upp_out, _ = self.uppLSTM(upper_input)
+        print("upp done")
         mid_out, _ = self.midLSTM(mid_input)
+        print("mid done")
         low_out, _ = self.lowLSTM(low_input)
-
+        print('low done')
         def apply_pca(self, features):
             # Center the data
             mean = features.mean(dim=0, keepdim=True)
@@ -390,7 +479,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
         # Combine features
         fused = upp_features + mid_features + low_features
-
+        print("postFuse Final Layers")
         # Final layers
         swisher = F.silu(self.fc1(fused))
         dropout = self.dropout(swisher)
