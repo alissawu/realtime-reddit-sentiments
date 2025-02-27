@@ -454,7 +454,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print("mid done")
         low_out, _ = self.lowLSTM(low_input)
         print('low done')
-        """def apply_pca(self, features):
+        def apply_pca(self, features):
             # Center the data
             mean = features.mean(dim=0, keepdim=True)
             centered = features - mean
@@ -470,15 +470,17 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             top_eigenvectors = eigenvectors[:, sorted_indices[:self.num_components]]
 
             # Project the data
-            return torch.matmul(centered, top_eigenvectors)"""
+            return torch.matmul(centered, top_eigenvectors)
 
         # Apply PCA to LSTM outputs
-        upp_features = self.apply_pca(upp_out)
-        mid_features = self.apply_pca(mid_out)
-        low_features = self.apply_pca(low_out)
-
+        #upp_features = self.apply_pca(upp_out)
+        #mid_features = self.apply_pca(mid_out)
+        #low_features = self.apply_pca(low_out)
+        print(upp_out.shape)
+        print(mid_out.shape)
+        print(low_out.shape)]
         # Combine features
-        fused = upp_features + mid_features + low_features
+        fused = upp_out + mid_out + low_out
         print("postFuse Final Layers")
         # Final layers
         swisher = F.silu(self.fc1(fused))
