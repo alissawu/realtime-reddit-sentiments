@@ -50,9 +50,9 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
         #bottom k4
         self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
-        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
-        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
-        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=True, dtype=torch.complex64)
+        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
+        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
+        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
 
         self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
 
