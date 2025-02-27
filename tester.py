@@ -655,84 +655,6 @@ def process_dataset(combined_dataset=Dataset):
     # Preprocess all datasets using label and text pipelines
     return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet))
 
-
-
-# Rest of your code remains the same
-max_len = 2048
-padding_type = 'post'
-vocab_size = 130000
-embedding_dim = 300
-
-batch_size = 16
-epoch_count = 7
-learning_rate = 0.004
-min_lr = 0.0005
-
-token_retriever = get_tokenizer("basic_english")
-#get t
-
-def yield_tokens(data_iter):
-    for text,label in data_iter:
-        if isinstance(text, str):  # If `text` is raw text
-            yield token_retriever(text)
-        elif isinstance(text, list):  # If `text` is already tokenized
-            yield text  # Use it directly without tokenizing again
-        else:
-            raise ValueError("Unexpected text format. Expected string or list of tokens.")
-
-
-class RedoneTupleDataset(Dataset):
-    def __init__(self, original_dataset):
-        self.data = []
-        for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
-            self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return self.data[idx]
-
-
-# Convert the datasets into PyTorch Dataset objects
-
-iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
-iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
-# Create wrapped datasets
-
-train_wrapped = RedoneTupleDataset(iter1)
-test_wrapped = RedoneTupleDataset(iter2)
-combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
-
-#iter1_wrapped = RedoneTupleDataset(iter1)
-#iter2_wrapped = RedoneTupleDataset(iter2)
-
-glove = GloVe(name='6B', dim=embedding_dim)
-
-glove_path = os.path.expanduser(
-    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-GloVe_itos = glove.itos
-
-
-
-
-
-#train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
-
-
-
-
-# Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
-#combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
-(train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
-
-print(f"Train dataset size: {len(train_dSet)}")
-print(f"Validation dataset size: {len(val_dSet)}")
-print(f"Test dataset size: {len(test_dSet)}")
-
-
-
-#filter out samples with text lengths greater than 2048 tokens
 def filter_large_samples(dataset, tokenizer, max_tokens=2048):
     filtered_data = []
     for item in dataset:
@@ -742,95 +664,8 @@ def filter_large_samples(dataset, tokenizer, max_tokens=2048):
         if len(tokenized_text) <= max_tokens:
             filtered_data.append(item)
     return filtered_data
-
-# Applying the filtering function to each dataset
-
-tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
-train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
-val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
-test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
-
-# Wrap the filtered datasets into PyTorch Dataset objects
-train_dSet = train_dSet_filtered
-val_dSet = val_dSet_filtered
-test_dSet = test_dSet_filtered
-
-#filter out samples with text lengths greater than 2048 tokens
 def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
     return [(text, label) for text, label in data if len(text) <= max_tokens]
-
-train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
-val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
-test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
-
-# Replace original data with filtered data
-train_data = train_data_filtered
-val_data = val_data_filtered
-test_data = test_data_filtered
-
-vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
-vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
-                                  ,max_tokens=vocab_size)
-#vocab.set_default_index(vocab["<unk>"])
-#vocab.unk_count = vocab['<unk>']
-pad_idx = vocab['<pad>']
-unk_idk =   vocab['<unk>']
-#if '<pad>' not in vocab:
- #   vocab['<pad>'] = len(vocab)
-#if '<unk>' not in vocab:
-#    vocab['<unk>'] = len(vocab)+1f
-
-glove_path = os.path.expanduser(
-    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-GloVe_itos = []
-
-
-# stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
-
-
-# Simulate a vocabulary of size `vocab_size`
-# Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
-# "<unk>" and "<pad>" are added for unknown tokens and padding
-print(dir(glove))
-# vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
-
-# Create vocab-to-index mapping
-# word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-
-pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
-# fix the vocab and use glove pretraining
-print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
-print(f"pretrained_vectors: {pretrained_vectors.shape}")
-for word, idx in vocab.get_stoi().items():
-    if word in glove.stoi:  # Check if word is in GloVe's vocabulary
-        # pretrained_vectors[idx] = stoi[word]
-        pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float16)
-    elif word == "<pad>":  # Padding vector (optional, all zeros by default)
-        pretrained_vectors[idx] = torch.zeros(embedding_dim)
-    else:  # For OOV words (e.g., "<unk>")
-        pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
-
-# Create PyTorch Embedding Layer
-embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
-
-"""
-def collate_batch(batch):
-    # after separately pipelining, zip
-    labels, texts = zip(*batch)
-    labels = torch.tensor(labels)
-    tokenizer=get_tokenizer("basic_english")
-    #texts = vocab(tokenizer(texts))
-    tokenized_texts =   [token_retriever(text)  for text in texts]
-    newer=[vocab(tokenizations)    for tokenizations in tokenized_texts]
-    tensorized_numbertexts   =   torch.tensor(newer)
-    print(tensorized_numbertexts)
-    for i in texts:
-        print(i)
-        print(type(i))
-    text_lengths = [len(text) for text in texts]
-
-    texts = pad_sequence(vocab(token_retriever(texts)), batch_first=True, padding_value=pad_idx)
-    return labels, texts, text_lengths"""
 def collate_batch(batch):
     # Unpack the batch into labels and texts
     texts, labels = zip(*batch)
@@ -858,103 +693,312 @@ def collate_batch(batch):
     return padded_texts,labels#, text_lengths
 
 
-dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
-dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
-dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
-# inst_test = IMDB(split="test")
 
-# this one
-all_texts = []
-all_labels = []
+def main():    # Rest of your code remains the same
+    max_len = 2048
+    padding_type = 'post'
+    vocab_size = 130000
+    embedding_dim = 300
 
-for text_batch,label_batch in dLoad_train:
-    all_texts.append(text_batch)
-    all_labels.append(label_batch)
-# TRIAL PIECE
-all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
-if all(isinstance(label, torch.Tensor) for label in all_labels):
+    batch_size = 16
+    epoch_count = 7
+    learning_rate = 0.004
+    min_lr = 0.0005
+
+    token_retriever = get_tokenizer("basic_english")
+    #get t
+
+    def yield_tokens(data_iter):
+        for text,label in data_iter:
+            if isinstance(text, str):  # If `text` is raw text
+                yield token_retriever(text)
+            elif isinstance(text, list):  # If `text` is already tokenized
+                yield text  # Use it directly without tokenizing again
+            else:
+                raise ValueError("Unexpected text format. Expected string or list of tokens.")
+
+
+    class RedoneTupleDataset(Dataset):
+        def __init__(self, original_dataset):
+            self.data = []
+            for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
+                self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
+
+        def __len__(self):
+            return len(self.data)
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+
+    # Convert the datasets into PyTorch Dataset objects
+
+    iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
+    iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
+    # Create wrapped datasets
+
+    train_wrapped = RedoneTupleDataset(iter1)
+    test_wrapped = RedoneTupleDataset(iter2)
+    combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
+
+    #iter1_wrapped = RedoneTupleDataset(iter1)
+    #iter2_wrapped = RedoneTupleDataset(iter2)
+
+    glove = GloVe(name='6B', dim=embedding_dim)
+
+    glove_path = os.path.expanduser(
+        "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+    GloVe_itos = glove.itos
+
+
+
+
+
+    #train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
+
+
+
+
+    # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
+    #combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
+    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
+
+    print(f"Train dataset size: {len(train_dSet)}")
+    print(f"Validation dataset size: {len(val_dSet)}")
+    print(f"Test dataset size: {len(test_dSet)}")
+
+
+
+    #filter out samples with text lengths greater than 2048 tokens
+    def filter_large_samples(dataset, tokenizer, max_tokens=2048):
+        filtered_data = []
+        for item in dataset:
+            text, label = item  # Assuming each item is a (text, label) tuple
+            tokenized_text = tokenizer(text)  # Tokenize the text
+            #print(tokenized_text)
+            if len(tokenized_text) <= max_tokens:
+                filtered_data.append(item)
+        return filtered_data
+
+    # Applying the filtering function to each dataset
+
+    tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
+    train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
+    val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
+    test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
+
+    # Wrap the filtered datasets into PyTorch Dataset objects
+    train_dSet = train_dSet_filtered
+    val_dSet = val_dSet_filtered
+    test_dSet = test_dSet_filtered
+
+    #filter out samples with text lengths greater than 2048 tokens
+    def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
+        return [(text, label) for text, label in data if len(text) <= max_tokens]
+
+    train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
+    val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
+    test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
+
+    # Replace original data with filtered data
+    train_data = train_data_filtered
+    val_data = val_data_filtered
+    test_data = test_data_filtered
+
+    vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
+    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
+                                      ,max_tokens=vocab_size)
+    #vocab.set_default_index(vocab["<unk>"])
+    #vocab.unk_count = vocab['<unk>']
+    pad_idx = vocab['<pad>']
+    unk_idk =   vocab['<unk>']
+    #if '<pad>' not in vocab:
+     #   vocab['<pad>'] = len(vocab)
+    #if '<unk>' not in vocab:
+    #    vocab['<unk>'] = len(vocab)+1f
+
+    glove_path = os.path.expanduser(
+        "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+    GloVe_itos = []
+
+
+    # stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+
+
+    # Simulate a vocabulary of size `vocab_size`
+    # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
+    # "<unk>" and "<pad>" are added for unknown tokens and padding
+    print(dir(glove))
+    # vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
+
+    # Create vocab-to-index mapping
+    # word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
+
+    pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
+    # fix the vocab and use glove pretraining
+    print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
+    print(f"pretrained_vectors: {pretrained_vectors.shape}")
+    for word, idx in vocab.get_stoi().items():
+        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
+            # pretrained_vectors[idx] = stoi[word]
+            pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float16)
+        elif word == "<pad>":  # Padding vector (optional, all zeros by default)
+            pretrained_vectors[idx] = torch.zeros(embedding_dim)
+        else:  # For OOV words (e.g., "<unk>")
+            pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
+
+    # Create PyTorch Embedding Layer
+    embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
+
+    """
+    def collate_batch(batch):
+        # after separately pipelining, zip
+        labels, texts = zip(*batch)
+        labels = torch.tensor(labels)
+        tokenizer=get_tokenizer("basic_english")
+        #texts = vocab(tokenizer(texts))
+        tokenized_texts =   [token_retriever(text)  for text in texts]
+        newer=[vocab(tokenizations)    for tokenizations in tokenized_texts]
+        tensorized_numbertexts   =   torch.tensor(newer)
+        print(tensorized_numbertexts)
+        for i in texts:
+            print(i)
+            print(type(i))
+        text_lengths = [len(text) for text in texts]
+    
+        texts = pad_sequence(vocab(token_retriever(texts)), batch_first=True, padding_value=pad_idx)
+        return labels, texts, text_lengths"""
+    def collate_batch(batch):
+        # Unpack the batch into labels and texts
+        texts, labels = zip(*batch)
+        max_length = 2048#4096
+        # Convert labels to tensors
+        labels = torch.tensor(labels)
+
+        # Tokenize texts
+        tokenized_texts = [token_retriever(text) for text in texts]
+
+        # Numericalize tokens
+
+        numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
+        if len(numericalized_texts[0]) < max_length:
+            numericalized_texts[0] = torch.cat(
+                [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
+            )
+        else:
+            numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
+        padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
+
+        # Calculate text lengths
+        text_lengths = [len(tokens) for tokens in numericalized_texts]
+
+        return padded_texts,labels#, text_lengths
+
+
+    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
+    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
+    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
+    # inst_test = IMDB(split="test")
+
+    # this one
+    all_texts = []
+    all_labels = []
+
+    for text_batch,label_batch in dLoad_train:
+        all_texts.append(text_batch)
+        all_labels.append(label_batch)
+    # TRIAL PIECE
+    all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
+    if all(isinstance(label, torch.Tensor) for label in all_labels):
+        train_labels_tensor = torch.cat(all_labels, dim=0)
+    else:
+        raise TypeError("All elements in `all_labels` must be tensors.")
+    # END OF TRIAL PIECE
+    #print(all_texts)
+    text_shapes =   [text.shape   for  text in all_texts]
+    #print(text_shapes)
+    #dim_problems
+
+    train_texts_tensor = torch.cat(all_texts, dim=0)
     train_labels_tensor = torch.cat(all_labels, dim=0)
-else:
-    raise TypeError("All elements in `all_labels` must be tensors.")
-# END OF TRIAL PIECE
-#print(all_texts)
-text_shapes =   [text.shape   for  text in all_texts]
-#print(text_shapes)
-#dim_problems
+    print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
 
-train_texts_tensor = torch.cat(all_texts, dim=0)
-train_labels_tensor = torch.cat(all_labels, dim=0)
-print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
+    #print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
+    #print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
 
-#print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
-#print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
+    """def yield_token(data_iter):
+        for _, text in data_iter:
+            yield token_retriever(text)"""
 
-"""def yield_token(data_iter):
-    for _, text in data_iter:
-        yield token_retriever(text)"""
+    # Training setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = CNNToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
+                                        batch_size, int(2048)).to(device)
 
-# Training setup
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = CNNToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
-                                    batch_size, int(2048)).to(device)
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-# Training loop with progress tracking
-print(f"Starting training on {device}")
-model.train()
-for epoch in range(epoch_count):
-    epoch_loss = 0
-    progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
 
-    for batch_idx, (inputs,labels) in enumerate(progress_bar):
-        print(f"Input Just Into Model: {inputs}")
-        inputs, labels = inputs.to(device), labels.to(device)
-        print(f"Inputs Into Model Shape: {inputs.shape}")
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-        epoch_loss += loss.item()
+    # Training loop with progress tracking
+    print(f"Starting training on {device}")
+    model.train()
+    for epoch in range(epoch_count):
+        epoch_loss = 0
+        progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
 
-        # Update progress bar
-        progress_bar.set_postfix({'batch_loss': f'{loss.item():.4f}',
-                                  'avg_loss': f'{epoch_loss / (batch_idx + 1):.4f}'})
+        for batch_idx, (inputs,labels) in enumerate(progress_bar):
+            print(f"Input Just Into Model: {inputs}")
+            inputs, labels = inputs.to(device), labels.to(device)
+            print(f"Inputs Into Model Shape: {inputs.shape}")
+            print(f"Batch {batch_idx}: ")
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
 
-    print(f'Epoch {epoch + 1}/{epoch_count}, Average Loss: {epoch_loss / len(dLoad_train):.4f}')
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-# Validation with progress tracking
-print("\nStarting validation...")
-model.eval()
-val_loss = 0
-val_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in tqdm(dLoad_val, desc='Validation'):
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        val_loss += loss.item()
-        val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+            epoch_loss += loss.item()
 
-val_loss /= len(dLoad_val)
-val_accuracy /= len(dLoad_val)
-print(f'Validation Loss: {val_loss:.4f}')
-print(f'Validation Accuracy: {val_accuracy:.4f}')
+            # Update progress bar
+            progress_bar.set_postfix({'batch_loss': f'{loss.item():.4f}',
+                                      'avg_loss': f'{epoch_loss / (batch_idx + 1):.4f}'})
 
-# Test evaluation with progress tracking
-print("\nStarting test evaluation...")
-test_accuracy = 0
-with torch.no_grad():
-    for inputs, labels in tqdm(dLoad_test, desc='Testing'):
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs)
-        test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+        print(f'Epoch {epoch + 1}/{epoch_count}, Average Loss: {epoch_loss / len(dLoad_train):.4f}')
 
-test_accuracy /= len(dLoad_test)
-print(f'Test Accuracy: {test_accuracy:.4f}')
+    # Validation with progress tracking
+    print("\nStarting validation...")
+    model.eval()
+    val_loss = 0
+    val_accuracy = 0
+    with torch.no_grad():
+        for inputs, labels in tqdm(dLoad_val, desc='Validation'):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            val_loss += loss.item()
+            val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
 
-# Save the model
-torch.save(model.state_dict(), 'sentiment_model.pth')
+    val_loss /= len(dLoad_val)
+    val_accuracy /= len(dLoad_val)
+    print(f'Validation Loss: {val_loss:.4f}')
+    print(f'Validation Accuracy: {val_accuracy:.4f}')
+
+    # Test evaluation with progress tracking
+    print("\nStarting test evaluation...")
+    test_accuracy = 0
+    with torch.no_grad():
+        for inputs, labels in tqdm(dLoad_test, desc='Testing'):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+
+    test_accuracy /= len(dLoad_test)
+    print(f'Test Accuracy: {test_accuracy:.4f}')
+
+    # Save the model
+    torch.save(model.state_dict(), 'sentiment_model.pth')
+if __name__ == '__main__':
+    main()
