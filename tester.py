@@ -4,6 +4,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
+import torchtext
 from torch.utils.data import DataLoader, Dataset, random_split
 import    torch.utils.checkpoint as checkpoint
 #from dask.dataframe import test_dataframe
@@ -12,7 +13,7 @@ import    torch.utils.checkpoint as checkpoint
 #from jsonschema.benchmarks.contains import middle
 #from torch.utils.tensorboard    import  SummaryWriter
 
-from torchtext.data.utils import get_tokenizer
+from torchtext.data import get_tokenizer
 from torch.utils.data import Dataset, ConcatDataset
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
 from datasets import load_dataset
@@ -320,9 +321,10 @@ class CNNToLSTMCustomInterleaving(nn.Module):
     def forward(self, x):
         # Ensure input is on correct device
         x = x.to(self.device)
-
+        print(x.shape)
         # Embedding
         x = self.embed(x)
+
         x = x.permute(0, 2, 1)
 
         # CNN Layers
@@ -533,7 +535,6 @@ def process_dataset(combined_dataset=Dataset):
         #return torch.tensor(tokenizer(text), dtype=torch.int64)
 
     def label_pipeline(label):
-        print(label)
         if isinstance(label, str):
             if label == "pos":
                 return torch.tensor(1, dtype=torch.float16)
@@ -546,11 +547,10 @@ def process_dataset(combined_dataset=Dataset):
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
-        print(f"Max Len:     {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
-        print(raw_data_split[0])
-        print(raw_data_split[1])
+
+        print(f"Max Len:     {max([len(text_pipeline(text)) for text,_ in raw_data_split])}")
         #print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
-        print(f"# of too big:{sum(len(text_pipeline(text)) > 2048 for _, text in raw_data_split)}")
+        print(f"# of too big:{sum(len(text_pipeline(text)) > 2048 for text, _ in raw_data_split)}")
         return  [(text_pipeline(text),label_pipeline(label))
                  for text, label in raw_data_split
         ]
@@ -593,8 +593,8 @@ def yield_tokens(data_iter):
 class RedoneTupleDataset(Dataset):
     def __init__(self, original_dataset):
         self.data = []
-        for text, label in original_dataset:  # torchtext IMDB returns (label, text) tuples
-            self.data.append((text, label))  # Swap order to match your expected format
+        for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
+            self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
 
     def __len__(self):
         return len(self.data)
@@ -613,36 +613,31 @@ train_wrapped = RedoneTupleDataset(iter1)
 test_wrapped = RedoneTupleDataset(iter2)
 combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
 
-iter1_wrapped = RedoneTupleDataset(iter1)
-iter2_wrapped = RedoneTupleDataset(iter2)
+#iter1_wrapped = RedoneTupleDataset(iter1)
+#iter2_wrapped = RedoneTupleDataset(iter2)
 
 glove = GloVe(name='6B', dim=embedding_dim)
 
 glove_path = os.path.expanduser(
     "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-GloVe_itos = []
-# Create vocabulary mapping
-vocab = {word: idx for idx, word in enumerate(glove.itos)}
+GloVe_itos = glove.itos
 
-if '<pad>' not in vocab:
-    vocab['<pad>'] = len(vocab)
-if '<unk>' not in vocab:
-    vocab['<unk>'] = len(vocab)
 
-pad_idx = vocab['<pad>']
 
-train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
 
-print(f"Train dataset size: {len(train_dSet)}")
-print(f"Validation dataset size: {len(val_dSet)}")
-print(f"Test dataset size: {len(test_dSet)}")
+
+#train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
+
 
 
 
 # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
-combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
+#combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
 (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
 
+print(f"Train dataset size: {len(train_dSet)}")
+print(f"Validation dataset size: {len(val_dSet)}")
+print(f"Test dataset size: {len(test_dSet)}")
 
 
 
@@ -665,16 +660,13 @@ val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
 test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
 
 # Wrap the filtered datasets into PyTorch Dataset objects
-train_dSet = RedoneTupleDataset(train_dSet_filtered)
-val_dSet = RedoneTupleDataset(val_dSet_filtered)
-test_dSet = RedoneTupleDataset(test_dSet_filtered)
-
+train_dSet = train_dSet_filtered
+val_dSet = val_dSet_filtered
+test_dSet = test_dSet_filtered
 
 #filter out samples with text lengths greater than 2048 tokens
 def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
-
     return [(text, label) for text, label in data if len(text) <= max_tokens]
-
 
 train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
 val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
@@ -685,17 +677,17 @@ train_data = train_data_filtered
 val_data = val_data_filtered
 test_data = test_data_filtered
 
-
-
-
-
-
-
-
-vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"])
 vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
-vocab.set_default_index(vocab["<unk>"])
-
+vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
+                                  ,max_tokens=vocab_size)
+#vocab.set_default_index(vocab["<unk>"])
+#vocab.unk_count = vocab['<unk>']
+pad_idx = vocab['<pad>']
+unk_idk =   vocab['<unk>']
+#if '<pad>' not in vocab:
+ #   vocab['<pad>'] = len(vocab)
+#if '<unk>' not in vocab:
+#    vocab['<unk>'] = len(vocab)+1f
 
 glove_path = os.path.expanduser(
     "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
@@ -709,15 +701,14 @@ GloVe_itos = []
 # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
 # "<unk>" and "<pad>" are added for unknown tokens and padding
 print(dir(glove))
-pad_idx = vocab["<pad>"]
 # vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
 
 # Create vocab-to-index mapping
 # word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-# absurdly big auauauaua 10000000
+
 pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
 # fix the vocab and use glove pretraining
-print(f"Max idx: {max(vocab.get_stoi().values())}")
+print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
 print(f"pretrained_vectors: {pretrained_vectors.shape}")
 for word, idx in vocab.get_stoi().items():
     if word in glove.stoi:  # Check if word is in GloVe's vocabulary
@@ -751,7 +742,7 @@ def collate_batch(batch):
     return labels, texts, text_lengths"""
 def collate_batch(batch):
     # Unpack the batch into labels and texts
-    labels, texts = zip(*batch)
+    texts, labels = zip(*batch)
     max_length = 2048#4096
     # Convert labels to tensors
     labels = torch.tensor(labels)
@@ -773,7 +764,7 @@ def collate_batch(batch):
     # Calculate text lengths
     text_lengths = [len(tokens) for tokens in numericalized_texts]
 
-    return labels, padded_texts#, text_lengths
+    return padded_texts,labels#, text_lengths
 
 
 dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
@@ -801,7 +792,7 @@ text_shapes =   [text.shape   for  text in all_texts]
 #dim_problems
 
 train_texts_tensor = torch.cat(all_texts, dim=0)
-train_labels_tensor = torch.cat(all_labels, dim=0) - 1
+train_labels_tensor = torch.cat(all_labels, dim=0)
 print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
 
 #print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
@@ -826,8 +817,9 @@ for epoch in range(epoch_count):
     progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
 
     for batch_idx, (inputs,labels) in enumerate(progress_bar):
+        print(f"Input Just Into Model: {inputs}")
         inputs, labels = inputs.to(device), labels.to(device)
-
+        print(f"Inputs Into Model Shape: {inputs.shape}")
         outputs = model(inputs)
         loss = criterion(outputs, labels)
 
