@@ -478,7 +478,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         #low_features = self.apply_pca(low_out)
         print(upp_out.shape)
         print(mid_out.shape)
-        print(low_out.shape)]
+        print(low_out.shape)
         # Combine features
         fused = upp_out + mid_out + low_out
         print("postFuse Final Layers")
