@@ -94,7 +94,8 @@ def main():
     # Load IMDB dataset using torchtext
     #train_iter = IMDB(split='train')
     #test_iter = IMDB(split='test')
-
+    for i in range(2):
+        print(i, torch.cuda.get_device_name(i))
     # Convert iterators to lists for easier handling
     train_data    =   list(load_dataset('stanfordnlp/imdb',split='train'))
     test_data = list(load_dataset('stanfordnlp/imdb',split='test'))
