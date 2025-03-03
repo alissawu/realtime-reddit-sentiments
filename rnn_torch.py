@@ -428,7 +428,7 @@ if __name__ == "__main__":
     def collate_batch(batch):
         #after separately pipelining, zip
         labels,texts = zip(*batch)
-        labels  =   torch.stack(labels)
+        labels = torch.stack([torch.tensor(label) for label in labels])
         text_lengths = [len(text) for text in texts]
         texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
         return  labels, texts, text_lengths
