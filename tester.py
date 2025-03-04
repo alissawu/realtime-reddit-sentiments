@@ -50,9 +50,9 @@ class   cnnToLSTMCustom(nn.Module):
         self.kern6s3p1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=6,stride=3, padding=2)#(2042+2*2)/3+1 = 683 from 85
         #bottom k4
         self.kern5s3 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=5,stride=3,padding=0)#(2043)/3+1=682  from 84
-        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
-        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
-        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64)
+        self.uppLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64,dropout=0.2)
+        self.midLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64,dropout=0.2)
+        self.lowLSTM    =   nn.LSTM(300, 4096, batch_first=True,bidirectional=False, dtype=torch.complex64,dropout=0.25)
 
         self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
 
@@ -273,7 +273,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_input_size,
             lstm_hidden,
             batch_first=True,
-            bidirectional=False,
+            bidirectional=False,dropout=0.2,
             dtype=torch.float16
         ).to(self.device)
 
@@ -281,14 +281,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_input_size,
             lstm_hidden,
             batch_first=True,
-            bidirectional=False,
+            bidirectional=False,dropout=0.2,
             dtype=torch.float16
         ).to(self.device)
 
         self.lowLSTM = nn.LSTM(
             lstm_input_size,
             lstm_hidden,
-            batch_first=True,
+            batch_first=True,dropout=0.25,
             bidirectional=False,
             dtype=torch.float16
         ).to(self.device)
@@ -299,9 +299,9 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         )
 
         # Fully connected layers
-        self.fc1 = nn.Linear(lstm_hidden * 2, 16, dtype=torch.float16).to(self.device)  # *2 for bidirectional
+        self.fc1 = nn.Linear(lstm_hidden, 8, dtype=torch.float16).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
-        self.fc2 = nn.Linear(16, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
+        self.fc2 = nn.Linear(8, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
 
     def kern2ImagTransformer(self, input_tensor):
         # batch_size,300,2047   k2s1
@@ -483,16 +483,30 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
             # Project the data
             return torch.matmul(centered, top_eigenvectors)
+        print(upp_out.shape)
+        print(mid_out.shape)
+        print(low_out.shape)
+        
+        mean_lstm1 = upp_out.mean(dim=2)  # [16, 600]
+        mean_lstm2 = mid_out.mean(dim=2)  # [16, 600]
+        mean_lstm3 = low_out.mean(dim=2)  # [16, 600]
+        print(f"lstm shape: {mean_lstm1.shape}")
+        print(f"embedding shape: {self.embed.shape}")
 
+        mean_embed = self.embed.mean(dim=1)  # [16, 2048]
+        print(f"mean_emb shape: {mean_embed.shape}")
+
+        fused = (self.weights[0] * mean_lstm1 +
+                 self.weights[1] * mean_lstm2 +
+                 self.weights[2] * mean_lstm3 +
+                 self.weights[3] * mean_embed)
+        print(f"fused shape: {fused.shape}")
         # Apply PCA to LSTM outputs
         #upp_features = self.apply_pca(upp_out)
         #mid_features = self.apply_pca(mid_out)
         #low_features = self.apply_pca(low_out)
-        print(upp_out.shape)
-        print(mid_out.shape)
-        print(low_out.shape)
+
         # Combine features
-        fused = upp_out + mid_out + low_out
         fused=fused.mean(dim=1)
         fused=fused.mean(dim=1)
 
