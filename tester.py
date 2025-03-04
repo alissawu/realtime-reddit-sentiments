@@ -516,16 +516,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         shape: torch.Size([16, 2048])
         fused
         shape: torch.Size([16, 2048])"""
-        # Apply PCA to LSTM outputs
-        #upp_features = self.apply_pca(upp_out)
-        #mid_features = self.apply_pca(mid_out)
-        #low_features = self.apply_pca(low_out)
 
-        print("postFuse Final Layers")
         # Final layers
         swisher = F.silu(self.fc1(fused))
+        print(f"silu Done")
         dropout = self.dropout(swisher)
         final_outputs = F.softmax(self.fc2(dropout), dim=1)
+        print(f"Almost Done")
+
         return torch.reshape(self.fc3(final_outputs), (16,)).squeeze()
 
         # noinspection PyUnreachableCode
@@ -780,26 +778,10 @@ def main():    # Rest of your code remains the same
     test_wrapped = RedoneTupleDataset(iter2)
     combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
 
-    #iter1_wrapped = RedoneTupleDataset(iter1)
-    #iter2_wrapped = RedoneTupleDataset(iter2)
-
     glove = GloVe(name='6B', dim=embedding_dim)
-
     glove_path = os.path.expanduser(
         "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
     GloVe_itos = glove.itos
-
-
-
-
-
-    #train_dSet, val_dSet, test_dSet = process_dataset(combined_dataset)
-
-
-
-
-    # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
-    #combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
     (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
 
     print(f"Train dataset size: {len(train_dSet)}")
@@ -889,24 +871,6 @@ def main():    # Rest of your code remains the same
     # Create PyTorch Embedding Layer
     embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
 
-    """
-    def collate_batch(batch):
-        # after separately pipelining, zip
-        labels, texts = zip(*batch)
-        labels = torch.tensor(labels)
-        tokenizer=get_tokenizer("basic_english")
-        #texts = vocab(tokenizer(texts))
-        tokenized_texts =   [token_retriever(text)  for text in texts]
-        newer=[vocab(tokenizations)    for tokenizations in tokenized_texts]
-        tensorized_numbertexts   =   torch.tensor(newer)
-        print(tensorized_numbertexts)
-        for i in texts:
-            print(i)
-            print(type(i))
-        text_lengths = [len(text) for text in texts]
-    
-        texts = pad_sequence(vocab(token_retriever(texts)), batch_first=True, padding_value=pad_idx)
-        return labels, texts, text_lengths"""
     def collate_batch(batch):
         # Unpack the batch into labels and texts
         texts, labels = zip(*batch)
@@ -994,7 +958,7 @@ def main():    # Rest of your code remains the same
             print(f"Batch {batch_idx}: ")
             #forward
             outputs = model(inputs)
-            loss = criterion(outputs, labels)
+            loss = criterion(outputs, labels.float())
             #backward
             optimizer.zero_grad()
             loss.backward()
