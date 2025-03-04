@@ -201,7 +201,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         super().__init__()
         self.max_len = max_len
         self.batch_size = batch_size
-        self.num_components = 200
+        self.num_components = 300
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Initialize embedding layer with float16 on correct device
@@ -256,8 +256,8 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         ).to(self.device)
 
         # LSTM layers with float16
-        lstm_hidden = embedding_dim * 2
-        lstm_input_size = embedding_dim * 2  # for interleaved input
+        lstm_hidden = embedding_dim
+        lstm_input_size = embedding_dim  # for interleaved input
         self.uppLSTM = nn.LSTM(
             lstm_input_size,
             lstm_hidden,
@@ -294,10 +294,10 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
         self.cumm_PCA   =   torch.zeros(2048,600)
         #should be going in as 16x2048
-        self.fc1 = nn.Linear(lstm_hidden, 8, dtype=torch.float16).to(self.device)  # *2 for bidirectional
+        self.fc1 = nn.Linear(2048, 2**8, dtype=torch.float16).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
-        self.fc2 = nn.Linear(8, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
-
+        self.fc2 = nn.Linear(2**8, 2**4, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
+        self.fc3 = nn.Linear(2**4, 1, dtype=torch.float16).to(self.device)
     def kern2ImagTransformer(self, input_tensor):
         # batch_size,300,2047   k2s1
         N, seq_len, num_filters = self.batch_size, 300, 2047
@@ -442,12 +442,12 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             interleaved[:, 0::2, :] = real_part
             interleaved[:, 1::2, :] = imag_part
             return interleaved
-        def apply_pca(self, features):
+        def apply_pca(features):
             batch,seq_len,D = features.shape
             flattened   =   features.reshape(-1, D)
 
             centered    =   flattened   -   flattened.mean(dim=0,keepdim=True)
-
+            centered    =   centered.to(torch.float32)
             #covariance matrix
             cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
 
@@ -457,20 +457,20 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             sorted_indices = torch.argsort(e_vals, descending=True)
             top_eigenvectors = e_vecs[:, sorted_indices[:self.num_components]]
 
-            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors)
+            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors).to(torch.float16)
             return proj_evecsToCentered.reshape(batch, seq_len, self.num_components)
         # Process complex combinations with interleaving and gradient tracking
         upper_combined = topk2 + topk4
 
-        upper_input = apply_pca(interleave_complex(upper_combined).transpose(1, 2))
+        upper_input =  apply_pca(interleave_complex(upper_combined).transpose(1, 2))
         print(f"Low Layers into LSTM: {upper_input.shape}")
 
         mid_combined = midk3 + midk6
 
-        mid_input = apply_pca(interleave_complex(mid_combined).transpose(1, 2))
+        mid_input =  apply_pca(interleave_complex(mid_combined).transpose(1, 2))
         print(f"Mid Layers into LSTM: {mid_input.shape} ")
 
-        low_input =  apply_pca(interleave_complex(lowk5).transpose(1, 2))
+        low_input =   apply_pca(interleave_complex(lowk5).transpose(1, 2))
 
         print(f"Low Layers into LSTM: {low_input.shape}")
         # Process through LSTMs
@@ -492,9 +492,9 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print(mid_out.shape)
         print(low_out.shape)
 
-        mean_lstm1 = upp_out.mean(dim=2)  # [16, 600]
-        mean_lstm2 = mid_out.mean(dim=2)  # [16, 600]
-        mean_lstm3 = low_out.mean(dim=2)  # [16, 600]
+        mean_lstm1 = upp_out.mean(dim=2)  # [16, 300]
+        mean_lstm2 = mid_out.mean(dim=2)  # [16, 300]
+        mean_lstm3 = low_out.mean(dim=2)  # [16, 300]
         print(f"lstm shape: {mean_lstm1.shape}")
         print(f"Embedding shape: {embedding_mat.shape}")
 
@@ -506,22 +506,27 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                  self.weights[2] * mean_lstm3 +
                  self.weights[3] * mean_embed)
         print(f"fused shape: {fused.shape}")
+        """torch.Size([16, 2048, 300])
+        torch.Size([16, 2048, 300])
+        lstm
+        shape: torch.Size([16, 2048])
+        Embedding
+        shape: torch.Size([16, 300, 2048])
+        mean_emb
+        shape: torch.Size([16, 2048])
+        fused
+        shape: torch.Size([16, 2048])"""
         # Apply PCA to LSTM outputs
         #upp_features = self.apply_pca(upp_out)
         #mid_features = self.apply_pca(mid_out)
         #low_features = self.apply_pca(low_out)
-
-        # Combine features
-        fused=fused.mean(dim=1)
-        #fused=fused.mean(dim=1)
 
         print("postFuse Final Layers")
         # Final layers
         swisher = F.silu(self.fc1(fused))
         dropout = self.dropout(swisher)
         final_outputs = F.softmax(self.fc2(dropout), dim=1)
-
-        return final_outputs
+        return torch.reshape(self.fc3(final_outputs), (16,)).squeeze()
 
         # noinspection PyUnreachableCode
 
@@ -972,7 +977,7 @@ def main():    # Rest of your code remains the same
 
 
 
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Training loop with progress tracking
@@ -987,9 +992,10 @@ def main():    # Rest of your code remains the same
             inputs, labels = inputs.to(device), labels.to(device)
             print(f"Inputs Into Model Shape: {inputs.shape}")
             print(f"Batch {batch_idx}: ")
+            #forward
             outputs = model(inputs)
             loss = criterion(outputs, labels)
-
+            #backward
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
