@@ -437,16 +437,20 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             interleaved[:, 0::2, :] = real_part
             interleaved[:, 1::2, :] = imag_part
             return interleaved
-
         # Process complex combinations with interleaving and gradient tracking
         upper_combined = topk2 + topk4
+
         upper_input = interleave_complex(upper_combined).transpose(1, 2)
+        print(f"Low Layers into LSTM: {upper_input.shape}")
 
         mid_combined = midk3 + midk6
+
         mid_input = interleave_complex(mid_combined).transpose(1, 2)
+        print(f"Mid Layers into LSTM: {mid_input.shape} ")
 
         low_input = interleave_complex(lowk5).transpose(1, 2)
-        print("Layers Done into LSTM")
+
+        print(f"Low Layers into LSTM: {low_input.shape}")
         # Process through LSTMs
         upp_out, _ = self.uppLSTM(upper_input)
         print("upp done")
@@ -454,6 +458,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print("mid done")
         low_out, _ = self.lowLSTM(low_input)
         print('low done')
+
+        #16 sum of the ordered e-values
+        #600,2048
+        #Norm Eq vs QR vs SVD
+        #find sparseness
+        #find max and min e-values to determine numer stability
+        #Should I trunacte the SVD?
+        #A^TA e-values by sorting each
         def apply_pca(self, features):
             # Center the data
             mean = features.mean(dim=0, keepdim=True)
@@ -481,6 +493,9 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print(low_out.shape)
         # Combine features
         fused = upp_out + mid_out + low_out
+        fused=fused.mean(dim=1)
+        fused=fused.mean(dim=1)
+
         print("postFuse Final Layers")
         # Final layers
         swisher = F.silu(self.fc1(fused))
@@ -895,9 +910,9 @@ def main():    # Rest of your code remains the same
         return padded_texts,labels#, text_lengths
 
 
-    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
-    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
-    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,num_workers=2, pin_memory=False)
+    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
     # inst_test = IMDB(split="test")
 
     # this one
