@@ -486,7 +486,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print(upp_out.shape)
         print(mid_out.shape)
         print(low_out.shape)
-        
+
         mean_lstm1 = upp_out.mean(dim=2)  # [16, 600]
         mean_lstm2 = mid_out.mean(dim=2)  # [16, 600]
         mean_lstm3 = low_out.mean(dim=2)  # [16, 600]
