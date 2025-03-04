@@ -267,7 +267,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         ).to(self.device)
 
         # LSTM layers with float16
-        lstm_hidden = 2048
+        lstm_hidden = embedding_dim * 2
         lstm_input_size = embedding_dim * 2  # for interleaved input
         self.uppLSTM = nn.LSTM(
             lstm_input_size,
@@ -413,7 +413,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         x = self.embed(x)
 
         x = x.permute(0, 2, 1)
-
+        embedding_mat = x
         # CNN Layers
         topk2 = self.kern2ImagTransformer(self.kern2s1(x))
         topk4 = self.kern4ImagTransformer(self.kern4s2(x))
@@ -453,11 +453,11 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         print(f"Low Layers into LSTM: {low_input.shape}")
         # Process through LSTMs
         upp_out, _ = self.uppLSTM(upper_input)
-        print("upp done")
+        print(f"upp done: {upp_out.shape}")
         mid_out, _ = self.midLSTM(mid_input)
-        print("mid done")
+        print(f"mid done: {mid_out.shape}")
         low_out, _ = self.lowLSTM(low_input)
-        print('low done')
+        print(f"low done: {low_out.shape}")
 
         #16 sum of the ordered e-values
         #600,2048
@@ -483,7 +483,6 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
             # Project the data
             return torch.matmul(centered, top_eigenvectors)
-        print(upp_out.shape)
         print(mid_out.shape)
         print(low_out.shape)
 
@@ -491,9 +490,9 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         mean_lstm2 = mid_out.mean(dim=2)  # [16, 600]
         mean_lstm3 = low_out.mean(dim=2)  # [16, 600]
         print(f"lstm shape: {mean_lstm1.shape}")
-        print(f"embedding shape: {self.embed.shape}")
+        print(f"Embedding shape: {embedding_mat}")
 
-        mean_embed = self.embed.mean(dim=1)  # [16, 2048]
+        mean_embed = embedding_mat.mean(dim=1)  # [16, 2048]
         print(f"mean_emb shape: {mean_embed.shape}")
 
         fused = (self.weights[0] * mean_lstm1 +
@@ -508,7 +507,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
         # Combine features
         fused=fused.mean(dim=1)
-        fused=fused.mean(dim=1)
+        #fused=fused.mean(dim=1)
 
         print("postFuse Final Layers")
         # Final layers
