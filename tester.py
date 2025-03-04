@@ -273,7 +273,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_input_size,
             lstm_hidden,
             batch_first=True,
-            bidirectional=True,
+            bidirectional=False,
             dtype=torch.float16
         ).to(self.device)
 
@@ -281,7 +281,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_input_size,
             lstm_hidden,
             batch_first=True,
-            bidirectional=True,
+            bidirectional=False,
             dtype=torch.float16
         ).to(self.device)
 
@@ -289,7 +289,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_input_size,
             lstm_hidden,
             batch_first=True,
-            bidirectional=True,
+            bidirectional=False,
             dtype=torch.float16
         ).to(self.device)
 
