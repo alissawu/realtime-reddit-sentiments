@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+import torch.linalg
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
@@ -41,7 +42,7 @@ class   cnnToLSTMCustom(nn.Module):
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
         self.batch_size = batch_size
-        self.num_components = 512
+        self.num_components = 300
 
         self.kern2s1 =   nn.Conv1d(in_channels=300,out_channels=300,kernel_size=2,stride=1) #255 to 2047
         self.kern4s2 = nn.Conv1d(in_channels=300, out_channels=300, kernel_size=4, stride=2)#127 to 1023
@@ -77,22 +78,10 @@ class   cnnToLSTMCustom(nn.Module):
         mid_outputs, _ = self.midLSTM(midk3.transpose(1, 2) + midk6.transpose(1, 2))
         low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
 
-        # Apply PLA
-        def apply_pla(features):
-            # Compute covariance matrix
-            cov_matrix = features.T @ features
-            eigvals, eigvecs = torch.linalg.eigh(cov_matrix)
 
-            # Sort eigenvectors by eigenvalues in descending order
-            sorted_indices = torch.argsort(eigvals, descending=True)
-            top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
-
-            # Project features onto top principal components
-            return features @ top_k_eigvecs
-
-        upp_features = apply_pla(upp_outputs.mean(dim=1))
-        mid_features = apply_pla(mid_outputs.mean(dim=1))
-        low_features = apply_pla(low_outputs.mean(dim=1))
+        upp_features =  apply_pca(upp_outputs.mean(dim=1))
+        mid_features =  apply_pca(mid_outputs.mean(dim=1))
+        low_features =  apply_pca(low_outputs.mean(dim=1))
 
         # Combine PLA-reduced features (simple concatenation or addition)
         fused = upp_features + mid_features + low_features  # Replace learned weights with direct combination
@@ -212,7 +201,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         super().__init__()
         self.max_len = max_len
         self.batch_size = batch_size
-        self.num_components = 512
+        self.num_components = 200
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Initialize embedding layer with float16 on correct device
@@ -298,7 +287,13 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float16, device=self.device)
         )
 
-        # Fully connected layers
+
+        #PCA buffers
+        D   =   embedding_dim*2
+        self.register_buffer('pca_mean',torch.zeros(D, dtype=torch.float16, device=self.device))
+
+        self.cumm_PCA   =   torch.zeros(2048,600)
+        #should be going in as 16x2048
         self.fc1 = nn.Linear(lstm_hidden, 8, dtype=torch.float16).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
         self.fc2 = nn.Linear(8, 2, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
@@ -405,6 +400,16 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
         return output_tensor
 
+    """def apply_pca(self, features):
+
+        batch, seq_len, D = features.shape
+        features_flat = features.reshape(-1, D)
+        #center the data using the precomputed global mean.
+        centered = features_flat - self.pca_mean  # self.pca_mean should have shape (D,)
+        #proj onto the PCA components.
+        projected = torch.matmul(centered, self.pca_components)  # shape: (batch*seq_len, num_components)
+        # Reshape back to (batch, seq_len, num_components)
+        return projected.reshape(batch, seq_len, self.num_components)"""
     def forward(self, x):
         # Ensure input is on correct device
         x = x.to(self.device)
@@ -437,18 +442,35 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             interleaved[:, 0::2, :] = real_part
             interleaved[:, 1::2, :] = imag_part
             return interleaved
+        def apply_pca(self, features):
+            batch,seq_len,D = features.shape
+            flattened   =   features.reshape(-1, D)
+
+            centered    =   flattened   -   flattened.mean(dim=0,keepdim=True)
+
+            #covariance matrix
+            cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
+
+            # Compute eigenvalues and eigenvectors
+            e_vals, e_vecs = torch.linalg.eigh(cov_matrix)
+
+            sorted_indices = torch.argsort(e_vals, descending=True)
+            top_eigenvectors = e_vecs[:, sorted_indices[:self.num_components]]
+
+            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors)
+            return proj_evecsToCentered.reshape(batch, seq_len, self.num_components)
         # Process complex combinations with interleaving and gradient tracking
         upper_combined = topk2 + topk4
 
-        upper_input = interleave_complex(upper_combined).transpose(1, 2)
+        upper_input = apply_pca(interleave_complex(upper_combined).transpose(1, 2))
         print(f"Low Layers into LSTM: {upper_input.shape}")
 
         mid_combined = midk3 + midk6
 
-        mid_input = interleave_complex(mid_combined).transpose(1, 2)
+        mid_input = apply_pca(interleave_complex(mid_combined).transpose(1, 2))
         print(f"Mid Layers into LSTM: {mid_input.shape} ")
 
-        low_input = interleave_complex(lowk5).transpose(1, 2)
+        low_input =  apply_pca(interleave_complex(lowk5).transpose(1, 2))
 
         print(f"Low Layers into LSTM: {low_input.shape}")
         # Process through LSTMs
@@ -466,23 +488,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         #find max and min e-values to determine numer stability
         #Should I trunacte the SVD?
         #A^TA e-values by sorting each
-        def apply_pca(self, features):
-            # Center the data
-            mean = features.mean(dim=0, keepdim=True)
-            centered = features - mean
 
-            # Compute covariance matrix
-            cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
-
-            # Compute eigenvalues and eigenvectors
-            eigenvalues, eigenvectors = torch.linalg.eigh(cov_matrix)
-
-            # Sort and select top components
-            sorted_indices = torch.argsort(eigenvalues, descending=True)
-            top_eigenvectors = eigenvectors[:, sorted_indices[:self.num_components]]
-
-            # Project the data
-            return torch.matmul(centered, top_eigenvectors)
         print(mid_out.shape)
         print(low_out.shape)
 
@@ -490,7 +496,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         mean_lstm2 = mid_out.mean(dim=2)  # [16, 600]
         mean_lstm3 = low_out.mean(dim=2)  # [16, 600]
         print(f"lstm shape: {mean_lstm1.shape}")
-        print(f"Embedding shape: {embedding_mat}")
+        print(f"Embedding shape: {embedding_mat.shape}")
 
         mean_embed = embedding_mat.mean(dim=1)  # [16, 2048]
         print(f"mean_emb shape: {mean_embed.shape}")
