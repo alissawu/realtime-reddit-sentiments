@@ -958,7 +958,7 @@ def main():    # Rest of your code remains the same
             print(f"Batch {batch_idx}: ")
             #forward
             outputs = model(inputs)
-            loss = criterion(outputs, labels.float()).to(torch.complex64)
+            loss = criterion(outputs, labels.float()).to(torch.float32)
             #backward
             optimizer.zero_grad()
             loss.backward()
