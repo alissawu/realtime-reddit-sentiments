@@ -204,20 +204,20 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.num_components = 300
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        # Initialize embedding layer with float16 on correct device
-        self.embed = nn.Embedding(vocab_size, embedding_dim, dtype=torch.float16).to(self.device)
-        pretrained_vecs = pretrained_vecs.to(self.device, dtype=torch.float16)
+        # Initialize embedding layer with float32 on correct device
+        self.embed = nn.Embedding(vocab_size, embedding_dim, dtype=torch.float32).to(self.device)
+        pretrained_vecs = pretrained_vecs.to(self.device, dtype=torch.float32)
         print(f"Embedding weight size: {self.embed.weight.data.size()}")
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
 
-        # CNN layers with float16
+        # CNN layers with float32
         self.kern2s1 = nn.Conv1d(
             in_channels=embedding_dim,
             out_channels=embedding_dim,
             kernel_size=2,
             stride=1,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.kern4s2 = nn.Conv1d(
@@ -225,7 +225,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             out_channels=embedding_dim,
             kernel_size=4,
             stride=2,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.kern3s3p1 = nn.Conv1d(
@@ -234,7 +234,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             kernel_size=3,
             stride=3,
             padding=2,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.kern6s3p1 = nn.Conv1d(
@@ -243,7 +243,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             kernel_size=6,
             stride=3,
             padding=2,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.kern5s3 = nn.Conv1d(
@@ -252,10 +252,10 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             kernel_size=5,
             stride=3,
             padding=0,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
-        # LSTM layers with float16
+        # LSTM layers with float32
         lstm_hidden = embedding_dim
         lstm_input_size = embedding_dim  # for interleaved input
         self.uppLSTM = nn.LSTM(
@@ -263,7 +263,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_hidden,
             batch_first=True,
             bidirectional=False,dropout=0.2,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.midLSTM = nn.LSTM(
@@ -271,7 +271,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_hidden,
             batch_first=True,
             bidirectional=False,dropout=0.2,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
         self.lowLSTM = nn.LSTM(
@@ -279,25 +279,25 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             lstm_hidden,
             batch_first=True,dropout=0.25,
             bidirectional=False,
-            dtype=torch.float16
+            dtype=torch.float32
         ).to(self.device)
 
-        # Weights parameter with float16
+        # Weights parameter with float32
         self.weights = nn.Parameter(
-            torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float16, device=self.device)
+            torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float32, device=self.device)
         )
 
 
         #PCA buffers
         D   =   embedding_dim*2
-        self.register_buffer('pca_mean',torch.zeros(D, dtype=torch.float16, device=self.device))
+        self.register_buffer('pca_mean',torch.zeros(D, dtype=torch.float32, device=self.device))
 
         self.cumm_PCA   =   torch.zeros(2048,600)
         #should be going in as 16x2048
-        self.fc1 = nn.Linear(2048, 2**8, dtype=torch.float16).to(self.device)  # *2 for bidirectional
+        self.fc1 = nn.Linear(2048, 2**8, dtype=torch.float32).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
-        self.fc2 = nn.Linear(2**8, 2**4, dtype=torch.float16).to(self.device)  # Fixed input dimension to match fc1 output
-        self.fc3 = nn.Linear(2**4, 1, dtype=torch.float16).to(self.device)
+        self.fc2 = nn.Linear(2**8, 2**4, dtype=torch.float32).to(self.device)  # Fixed input dimension to match fc1 output
+        self.fc3 = nn.Linear(2**4, 1, dtype=torch.float32).to(self.device)
     def kern2ImagTransformer(self, input_tensor):
         # batch_size,300,2047   k2s1
         N, seq_len, num_filters = self.batch_size, 300, 2047
@@ -436,7 +436,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                 channels * 2,
                 seq_len,
                 device=self.device,
-                dtype=torch.float16
+                dtype=torch.float32
             )
             print("reals and imag")
             interleaved[:, 0::2, :] = real_part
@@ -447,7 +447,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             flattened   =   features.reshape(-1, D)
 
             centered    =   flattened   -   flattened.mean(dim=0,keepdim=True)
-            centered    =   centered.to(torch.float32)
+            centered    =   centered.to(torch.float64)
             #covariance matrix
             cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
 
@@ -457,7 +457,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             sorted_indices = torch.argsort(e_vals, descending=True)
             top_eigenvectors = e_vecs[:, sorted_indices[:self.num_components]]
 
-            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors).to(torch.float16)
+            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors).to(torch.float32)
             return proj_evecsToCentered.reshape(batch, seq_len, self.num_components)
         # Process complex combinations with interleaving and gradient tracking
         upper_combined = topk2 + topk4
@@ -540,7 +540,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
         # Create the output tensor
-        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.float16)
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.float32)
 
         for i in range(num_filters):
             #[orig,overlap_back]
@@ -555,8 +555,8 @@ class CNNToLSTMCustomInterleaving(nn.Module):
     def kern4ImagTransformer(self,input_tensor):
         #batch_size,300,1023  k4s2
         N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex32)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex32)
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
         for i in range(num_filters):
             # Compute target indices for filter i
             indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
@@ -570,8 +570,8 @@ class CNNToLSTMCustomInterleaving(nn.Module):
     def kern3ImagTransformer(self,input_tensor):
         #batch_size,300,684     k3s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex32)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex32)
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
         #[][][,1]
         #[,3][,5][,7]
         #[][][]
@@ -592,8 +592,8 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         # Original tensor of shape (N, 300, 683)
         #batch_size,300,683 k6s3p2
         N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex32)
-        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex32)
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
         # [][][,1][2,][4,][6,]
         # [,3][,5][,7][8,][10,][12,]
         # [][][][][][]
@@ -619,7 +619,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         N, embedding_dim, num_filters = self.batch_size, 300, 682
 
         # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
-        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex32)
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
 
         # Step 2: Assign imaginary values for outlier filter 0
         output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
@@ -665,13 +665,13 @@ def process_dataset(combined_dataset=Dataset):
     def label_pipeline(label):
         if isinstance(label, str):
             if label == "pos":
-                return torch.tensor(1, dtype=torch.float16)
+                return torch.tensor(1, dtype=torch.float32)
             elif label == "neg":
-                return torch.tensor(0, dtype=torch.float16)
+                return torch.tensor(0, dtype=torch.float32)
             else:
                 raise ValueError(f"Unexpected label: {label}")
         elif isinstance(label, int) or label.isdigit():
-            return torch.tensor(float(int(label) - 1), dtype=torch.float16)
+            return torch.tensor(float(int(label) - 1), dtype=torch.float32)
         else:
             raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
@@ -730,177 +730,177 @@ def collate_batch(batch):
     return padded_texts,labels#, text_lengths
 
 
+max_len = 2048
+padding_type = 'post'
+vocab_size = 130000
+embedding_dim = 300
 
-def main():    # Rest of your code remains the same
-    max_len = 2048
-    padding_type = 'post'
-    vocab_size = 130000
-    embedding_dim = 300
+batch_size = 16
+epoch_count = 7
+learning_rate = 0.004
+min_lr = 0.0005
 
-    batch_size = 16
-    epoch_count = 7
-    learning_rate = 0.004
-    min_lr = 0.0005
+token_retriever = get_tokenizer("basic_english")
+#get t
 
-    token_retriever = get_tokenizer("basic_english")
-    #get t
-
-    def yield_tokens(data_iter):
-        for text,label in data_iter:
-            if isinstance(text, str):  # If `text` is raw text
-                yield token_retriever(text)
-            elif isinstance(text, list):  # If `text` is already tokenized
-                yield text  # Use it directly without tokenizing again
-            else:
-                raise ValueError("Unexpected text format. Expected string or list of tokens.")
-
-
-    class RedoneTupleDataset(Dataset):
-        def __init__(self, original_dataset):
-            self.data = []
-            for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
-                self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
-
-        def __len__(self):
-            return len(self.data)
-
-        def __getitem__(self, idx):
-            return self.data[idx]
-
-
-    # Convert the datasets into PyTorch Dataset objects
-
-    iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
-    iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
-    # Create wrapped datasets
-
-    train_wrapped = RedoneTupleDataset(iter1)
-    test_wrapped = RedoneTupleDataset(iter2)
-    combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
-
-    glove = GloVe(name='6B', dim=embedding_dim)
-    glove_path = os.path.expanduser(
-        "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-    GloVe_itos = glove.itos
-    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
-
-    print(f"Train dataset size: {len(train_dSet)}")
-    print(f"Validation dataset size: {len(val_dSet)}")
-    print(f"Test dataset size: {len(test_dSet)}")
-
-
-
-    #filter out samples with text lengths greater than 2048 tokens
-    def filter_large_samples(dataset, tokenizer, max_tokens=2048):
-        filtered_data = []
-        for item in dataset:
-            text, label = item  # Assuming each item is a (text, label) tuple
-            tokenized_text = tokenizer(text)  # Tokenize the text
-            #print(tokenized_text)
-            if len(tokenized_text) <= max_tokens:
-                filtered_data.append(item)
-        return filtered_data
-
-    # Applying the filtering function to each dataset
-
-    tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
-    train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
-    val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
-    test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
-
-    # Wrap the filtered datasets into PyTorch Dataset objects
-    train_dSet = train_dSet_filtered
-    val_dSet = val_dSet_filtered
-    test_dSet = test_dSet_filtered
-
-    #filter out samples with text lengths greater than 2048 tokens
-    def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
-        return [(text, label) for text, label in data if len(text) <= max_tokens]
-
-    train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
-    val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
-    test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
-
-    # Replace original data with filtered data
-    train_data = train_data_filtered
-    val_data = val_data_filtered
-    test_data = test_data_filtered
-
-    vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
-    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
-                                      ,max_tokens=vocab_size)
-    #vocab.set_default_index(vocab["<unk>"])
-    #vocab.unk_count = vocab['<unk>']
-    pad_idx = vocab['<pad>']
-    unk_idk =   vocab['<unk>']
-    #if '<pad>' not in vocab:
-     #   vocab['<pad>'] = len(vocab)
-    #if '<unk>' not in vocab:
-    #    vocab['<unk>'] = len(vocab)+1f
-
-    glove_path = os.path.expanduser(
-        "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-    GloVe_itos = []
-
-
-    # stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
-
-
-    # Simulate a vocabulary of size `vocab_size`
-    # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
-    # "<unk>" and "<pad>" are added for unknown tokens and padding
-    print(dir(glove))
-    # vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
-
-    # Create vocab-to-index mapping
-    # word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-
-    pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
-    # fix the vocab and use glove pretraining
-    print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
-    print(f"pretrained_vectors: {pretrained_vectors.shape}")
-    for word, idx in vocab.get_stoi().items():
-        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
-            # pretrained_vectors[idx] = stoi[word]
-            pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float16)
-        elif word == "<pad>":  # Padding vector (optional, all zeros by default)
-            pretrained_vectors[idx] = torch.zeros(embedding_dim)
-        else:  # For OOV words (e.g., "<unk>")
-            pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
-
-    # Create PyTorch Embedding Layer
-    embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
-
-    def collate_batch(batch):
-        # Unpack the batch into labels and texts
-        texts, labels = zip(*batch)
-        max_length = 2048#4096
-        # Convert labels to tensors
-        labels = torch.tensor(labels)
-
-        # Tokenize texts
-        tokenized_texts = [token_retriever(text) for text in texts]
-
-        # Numericalize tokens
-
-        numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
-        if len(numericalized_texts[0]) < max_length:
-            numericalized_texts[0] = torch.cat(
-                [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
-            )
+def yield_tokens(data_iter):
+    for text,label in data_iter:
+        if isinstance(text, str):  # If `text` is raw text
+            yield token_retriever(text)
+        elif isinstance(text, list):  # If `text` is already tokenized
+            yield text  # Use it directly without tokenizing again
         else:
-            numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
-        padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
-
-        # Calculate text lengths
-        text_lengths = [len(tokens) for tokens in numericalized_texts]
-
-        return padded_texts,labels#, text_lengths
+            raise ValueError("Unexpected text format. Expected string or list of tokens.")
 
 
-    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
-    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
-    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+class RedoneTupleDataset(Dataset):
+    def __init__(self, original_dataset):
+        self.data = []
+        for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
+            self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+
+# Convert the datasets into PyTorch Dataset objects
+
+iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
+iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
+# Create wrapped datasets
+
+train_wrapped = RedoneTupleDataset(iter1)
+test_wrapped = RedoneTupleDataset(iter2)
+combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
+
+glove = GloVe(name='6B', dim=embedding_dim)
+glove_path = os.path.expanduser(
+    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+GloVe_itos = glove.itos
+(train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
+
+print(f"Train dataset size: {len(train_dSet)}")
+print(f"Validation dataset size: {len(val_dSet)}")
+print(f"Test dataset size: {len(test_dSet)}")
+
+
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples(dataset, tokenizer, max_tokens=2048):
+    filtered_data = []
+    for item in dataset:
+        text, label = item  # Assuming each item is a (text, label) tuple
+        tokenized_text = tokenizer(text)  # Tokenize the text
+        #print(tokenized_text)
+        if len(tokenized_text) <= max_tokens:
+            filtered_data.append(item)
+    return filtered_data
+
+# Applying the filtering function to each dataset
+
+tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
+train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
+val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
+test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
+
+# Wrap the filtered datasets into PyTorch Dataset objects
+train_dSet = train_dSet_filtered
+val_dSet = val_dSet_filtered
+test_dSet = test_dSet_filtered
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
+    return [(text, label) for text, label in data if len(text) <= max_tokens]
+
+train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
+val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
+test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
+
+# Replace original data with filtered data
+train_data = train_data_filtered
+val_data = val_data_filtered
+test_data = test_data_filtered
+
+vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
+vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
+                                  ,max_tokens=vocab_size)
+#vocab.set_default_index(vocab["<unk>"])
+#vocab.unk_count = vocab['<unk>']
+pad_idx = vocab['<pad>']
+unk_idk =   vocab['<unk>']
+#if '<pad>' not in vocab:
+ #   vocab['<pad>'] = len(vocab)
+#if '<unk>' not in vocab:
+#    vocab['<unk>'] = len(vocab)+1f
+
+glove_path = os.path.expanduser(
+    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+GloVe_itos = []
+
+
+# stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+
+
+# Simulate a vocabulary of size `vocab_size`
+# Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
+# "<unk>" and "<pad>" are added for unknown tokens and padding
+print(dir(glove))
+# vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
+
+# Create vocab-to-index mapping
+# word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
+
+pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
+# fix the vocab and use glove pretraining
+print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
+print(f"pretrained_vectors: {pretrained_vectors.shape}")
+for word, idx in vocab.get_stoi().items():
+    if word in glove.stoi:  # Check if word is in GloVe's vocabulary
+        # pretrained_vectors[idx] = stoi[word]
+        pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float32)
+    elif word == "<pad>":  # Padding vector (optional, all zeros by default)
+        pretrained_vectors[idx] = torch.zeros(embedding_dim)
+    else:  # For OOV words (e.g., "<unk>")
+        pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
+
+# Create PyTorch Embedding Layer
+embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
+
+def collate_batch(batch):
+    # Unpack the batch into labels and texts
+    texts, labels = zip(*batch)
+    max_length = 2048#4096
+    # Convert labels to tensors
+    labels = torch.tensor(labels)
+
+    # Tokenize texts
+    tokenized_texts = [token_retriever(text) for text in texts]
+
+    # Numericalize tokens
+
+    numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
+    if len(numericalized_texts[0]) < max_length:
+        numericalized_texts[0] = torch.cat(
+            [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
+        )
+    else:
+        numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
+    padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
+
+    # Calculate text lengths
+    text_lengths = [len(tokens) for tokens in numericalized_texts]
+
+    return padded_texts,labels#, text_lengths
+
+
+dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+def main():    # Rest of your code remains the same
+
     # inst_test = IMDB(split="test")
 
     # this one
@@ -958,7 +958,7 @@ def main():    # Rest of your code remains the same
             print(f"Batch {batch_idx}: ")
             #forward
             outputs = model(inputs)
-            loss = criterion(outputs, labels.float()).to(torch.float32)
+            loss = criterion(outputs, labels.float()).to(torch.float64)
             #backward
             optimizer.zero_grad()
             loss.backward()
