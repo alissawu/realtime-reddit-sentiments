@@ -293,12 +293,25 @@ def process_dataset(combined_dataset=Dataset):
     test_size = int(total_size * 0.1)
     tokenizer = get_tokenizer("basic_english")
 
+    train_dSet, test_dSet,val_dSet = random_split(combined_dataset, [train_size,val_size, test_size])
+
     def yield_tokens(data_iter):
         for label, text in data_iter:
-            yield tokenizer(text)
+            if isinstance(text, str):
+                yield tokenizer(data_iter)
+            elif isinstance(data_iter, list):
+                yield data_iter
+            else:
+                raise ValueError("Unexpected text format. Expected string or list of tokens.")
+    trained_vocab   =   build_vocab_from_iterator(yield_tokens(train_dSet),
+    specials=["<unk>", "<pad>"],
+    special_first=True)
+    trained_vocab.set_default_index(trained_vocab["<unk>"])
 
     def text_pipeline(text):
-        return tokenizer(text)
+        tokens = tokenizer(text)
+        indices = [trained_vocab[token] for token in tokens]
+        return torch.tensor(indices, dtype=torch.long)
 
         #return torch.tensor(tokenizer(text), dtype=torch.int64)
 
@@ -313,21 +326,21 @@ def process_dataset(combined_dataset=Dataset):
         elif isinstance(label, int) or label.isdigit():
             return torch.tensor(float(int(label) - 1), dtype=torch.float)
         else:
-            raise ValueError(f"Unsupported label type: {label}")
+            raise ValueError(f"Unsupported label: {label} of type {type(label)}")
     def pipeline_driver(raw_data_split):
+        #max_len = max(text_pipeline(txt).size(0) for _, txt in raw_data_split)
+        print(raw_data_split(0))
         print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
         return  [(label_pipeline(label),text_pipeline(text))
-                 for label, text in raw_data_split
-        ]
+                 for label, text in raw_data_split]
 
     # Create train and test datasets with random split
-    train_dSet, test_dSet,val_dSet = random_split(combined_dataset, [train_size,val_size, test_size])
     #train_size =   25000+25000//split_1 or 50000*0.7
     #test_size   =   25000(1-1//split_1) or 50000*0.1
     #val_size   =   25000(8/10-2/5) or 50000*0.2
 
     # Preprocess all datasets using label and text pipelines
-    return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet))
+    return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet)),   trained_vocab
 
 if __name__ == "__main__":
     #params
@@ -374,17 +387,16 @@ if __name__ == "__main__":
     iter2_wrapped = redoneTupleDataset(iter2)
 
 
-
     glove = GloVe(name="6B", dim=embedding_dim)
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
     GloVe_itos = []
 
     # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
     combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
-    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data)    =   process_dataset(combined_dataset,)
-    vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>","<pad>"])
-    vocab_size = int(len(vocab.get_stoi())//2+1)
-    vocab.set_default_index(vocab["<unk>"])
+    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data),   trained_vocab    =   process_dataset(combined_dataset)
+    pad_idx = trained_vocab["<pad>"]
+
+    trained_vocab_size = int(len(trained_vocab.get_stoi())//2+1)
 #finish vocab tomorrow 1/9
 
     glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
@@ -404,7 +416,6 @@ if __name__ == "__main__":
     # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
     # "<unk>" and "<pad>" are added for unknown tokens and padding
     print(dir(glove))
-    pad_idx =   vocab["<pad>"]
     #vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
 
     # Create vocab-to-index mapping
@@ -412,7 +423,7 @@ if __name__ == "__main__":
 #absurdly big auauauaua 100000000
     pretrained_vectors = torch.zeros((10000000, embedding_dim))
     # fix the vocab and use glove pretraining
-    for word, idx in vocab.get_stoi().items():
+    for word, idx in trained_vocab.get_stoi().items():
         if word in glove.stoi:  # Check if word is in GloVe's vocabulary
             #pretrained_vectors[idx] = stoi[word]
 
