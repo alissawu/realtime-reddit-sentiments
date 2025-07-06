@@ -298,8 +298,8 @@ def process_dataset(combined_dataset=Dataset):
     def yield_tokens(data_iter):
         for label, text in data_iter:
             if isinstance(text, str):
-                yield tokenizer(data_iter)
-            elif isinstance(data_iter, list):
+                yield tokenizer(text)
+            elif isinstance(text, list):
                 yield data_iter
             else:
                 raise ValueError("Unexpected text format. Expected string or list of tokens.")
@@ -329,7 +329,7 @@ def process_dataset(combined_dataset=Dataset):
             raise ValueError(f"Unsupported label: {label} of type {type(label)}")
     def pipeline_driver(raw_data_split):
         #max_len = max(text_pipeline(txt).size(0) for _, txt in raw_data_split)
-        print(raw_data_split(0))
+#        print(raw_data_split(0))
         print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
         return  [(label_pipeline(label),text_pipeline(text))
                  for label, text in raw_data_split]
@@ -361,6 +361,7 @@ if __name__ == "__main__":
     def yield_tokens(data_iter):
         for _, text in data_iter:
             if isinstance(text, str):  # If `text` is raw text
+                print(token_retriever(text))
                 yield token_retriever(text)
             elif isinstance(text, list):  # If `text` is already tokenized
                 yield text  # Use it directly without tokenizing again
@@ -423,6 +424,7 @@ if __name__ == "__main__":
 #absurdly big auauauaua 100000000
     pretrained_vectors = torch.zeros((10000000, embedding_dim))
     # fix the vocab and use glove pretraining
+
     for word, idx in trained_vocab.get_stoi().items():
         if word in glove.stoi:  # Check if word is in GloVe's vocabulary
             #pretrained_vectors[idx] = stoi[word]
@@ -441,7 +443,12 @@ if __name__ == "__main__":
         labels,texts = zip(*batch)
         labels = torch.stack([torch.tensor(label) for label in labels])
         text_lengths = [len(text) for text in texts]
-        texts   =   pad_sequence(texts, batch_first=True, padding_value=pad_idx)
+        token_tensors   =   []
+        for txt in texts:
+            tokens = token_retriever(txt)
+            ids = [trained_vocab[t] for t in tokens]
+            token_tensors.append(torch.tensor(ids, dtype=torch.long))
+        texts   =   pad_sequence(token_tensors, batch_first=True, padding_value=pad_idx)
         return  labels, texts, text_lengths
 
     dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True,shuffle=True,    collate_fn=collate_batch)
@@ -477,8 +484,7 @@ if __name__ == "__main__":
 #this one
     all_texts   =   []
     all_labels = []
-
-    for text_batch, label_batch in dLoad_train:
+    for label_batch, text_batch,    length_batch in dLoad_train:
         all_texts.append(text_batch)
         all_labels.append(label_batch)
     #TRIAL PIECE
