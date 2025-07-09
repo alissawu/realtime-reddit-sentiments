@@ -5,22 +5,12 @@ from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
-#from dask.dataframe import test_dataframe
-#from more_itertools.more import padded
-#from attr.validators import max_len
-#from jsonschema.benchmarks.contains import middle
-#from torch.utils.tensorboard    import  SummaryWriter
 from torchtext.datasets import IMDB
 from torchtext.data.utils import get_tokenizer
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
 from torch.utils.data import ConcatDataset
-
-
-
 from    collections import  Counter,    OrderedDict
 #https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
-
-import numpy    as np
 import requests
 
 #from epoch_test import batch_size, train_loader
