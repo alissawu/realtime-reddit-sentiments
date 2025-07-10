@@ -30,7 +30,7 @@ import requests
 from itertools  import tee
 #from epoch_test import batch_size, train_loader
 
-
+"""
 class   cnnToLSTMCustom(nn.Module):
     def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int , max_len:    int):
         super(cnnToLSTMCustom,self).__init__()
@@ -193,8 +193,7 @@ class   cnnToLSTMCustom(nn.Module):
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
 
         return output_tensor
-
-
+"""
 class CNNToLSTMCustomInterleaving(nn.Module):
     def __init__(self, vocab_size: int, embedding_dim: int, pretrained_vecs, batch_size: int, max_len: int,
                  device=None):
@@ -768,7 +767,8 @@ class RedoneTupleDataset(Dataset):
 
 # Convert the datasets into PyTorch Dataset objects
 
-iter1   =   list(load_dataset('stanfordnlp/imdb',split='train'))
+iter1   =   load_dataset('imdb',split='train')
+iter1   =   list(iter1)
 iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
 # Create wrapped datasets
 

@@ -1,278 +1,485 @@
 import os
 import torch
 import torch.nn as nn
+import torch.linalg
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset, TensorDataset, random_split
-from torchtext.datasets import IMDB
-from torchtext.data.utils import get_tokenizer
+import torchtext
+from torch.utils.data import DataLoader, Dataset, random_split
+import    torch.utils.checkpoint as checkpoint
+#from dask.dataframe import test_dataframe
+#from more_itertools.more import padded
+
+#from jsonschema.benchmarks.contains import middle
+#from torch.utils.tensorboard    import  SummaryWriter
+
+from torchtext.data import get_tokenizer
+from torch.utils.data import Dataset, ConcatDataset
 from torchtext.vocab    import Vocab, build_vocab_from_iterator,   GloVe
+from datasets import load_dataset
 from torch.utils.data import ConcatDataset
+
+from tqdm import tqdm
+
 from    collections import  Counter,    OrderedDict
 #https://saifgazali.medium.com/n-gram-cnn-model-for-sentimental-analysis-bb2aadd5dcb0
+
+import numpy    as np
 import requests
+from itertools  import tee
+#from epoch_test import batch_size, train_loader
 
 #from epoch_test import batch_size, train_loader
 
 
-class   cnnToLSTMCustom(nn.Module):
-    def __init__(self,vocab_size:   int , embedding_dim:    int , pretrained_vecs ,batch_size:    int ):
-        super(cnnToLSTMCustom,self).__init__()
-        #top k2 k4
-        #range(0,256,1)
-        self.embed  =   nn.Embedding(vocab_size, embedding_dim)
+class CNNToLSTMCustomInterleaving(nn.Module):
+    def __init__(self, vocab_size: int, embedding_dim: int, pretrained_vecs, batch_size: int, max_len: int,
+                 device=None):
+        super().__init__()
+        self.max_len = max_len
+        self.batch_size = batch_size
+        self.num_components = 300
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Initialize embedding layer with float32 on correct device
+        self.embed = nn.Embedding(vocab_size, embedding_dim, dtype=torch.float32).to(self.device)
+        pretrained_vecs = pretrained_vecs.to(self.device, dtype=torch.float32)
+        print(f"Embedding weight size: {self.embed.weight.data.size()}")
         self.embed.weight.data.copy_(pretrained_vecs)
         self.embed.weight.requires_grad = False
-        self.batch_size = batch_size
-#
-        self.kern2s1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=2,stride=1) #255
-        self.kern4s2 = nn.Conv1d(in_channels=256, out_channels=300, kernel_size=4, stride=2)#127
-        #mid k3 k6
-        self.kern3s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=3,stride=3, padding=1)#(253+2*1)/3+1=86
-        self.kern6s3p1 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=6,stride=3, padding=1)#(250+2*1)/3+1 = 85
-        #bottom k4
-        self.kern5s3 =   nn.Conv1d(in_channels=256,out_channels=300,kernel_size=5,stride=3,padding=2)#(251+2*2)/3+1=86
-        self.uppLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
-        self.midLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
-        self.lowLSTM    =   nn.LSTM(300, 512, batch_first=True,bidirectional=True)
 
-        self.weights    =   nn.Parameter(torch.tensor([0.25,0.25,0.25,0.25],dtype=torch.float))
+        # CNN layers with float32
+        self.kern2s1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=2,
+            stride=1,
+            dtype=torch.float32
+        ).to(self.device)
 
-        self.fc1    =   nn.Linear(256,16)
+        self.kern4s2 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=4,
+            stride=2,
+            dtype=torch.float32
+        ).to(self.device)
+
+        self.kern3s3p1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=3,
+            stride=3,
+            padding=2,
+            dtype=torch.float32
+        ).to(self.device)
+
+        self.kern6s3p1 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=6,
+            stride=3,
+            padding=2,
+            dtype=torch.float32
+        ).to(self.device)
+
+        self.kern5s3 = nn.Conv1d(
+            in_channels=embedding_dim,
+            out_channels=embedding_dim,
+            kernel_size=5,
+            stride=3,
+            padding=0,
+            dtype=torch.float32
+        ).to(self.device)
+
+        # LSTM layers with float32
+        lstm_hidden = embedding_dim
+        lstm_input_size = embedding_dim  # for interleaved input
+        self.uppLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,
+            bidirectional=False,dropout=0.2,
+            dtype=torch.float32
+        ).to(self.device)
+
+        self.midLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,
+            bidirectional=False,dropout=0.2,
+            dtype=torch.float32
+        ).to(self.device)
+
+        self.lowLSTM = nn.LSTM(
+            lstm_input_size,
+            lstm_hidden,
+            batch_first=True,dropout=0.25,
+            bidirectional=False,
+            dtype=torch.float32
+        ).to(self.device)
+
+        # Weights parameter with float32
+        self.weights = nn.Parameter(
+            torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float32, device=self.device)
+        )
+
+
+        #PCA buffers
+        D   =   embedding_dim*2
+        self.register_buffer('pca_mean',torch.zeros(D, dtype=torch.float32, device=self.device))
+
+        self.cumm_PCA   =   torch.zeros(2048,600)
+        #should be going in as 16x2048
+        self.fc1 = nn.Linear(2048, 2**8, dtype=torch.float32).to(self.device)  # *2 for bidirectional
         self.dropout = nn.Dropout(0.25)
-        self.fc2 = nn.Linear(16,2)
+        self.fc2 = nn.Linear(2**8, 2**4, dtype=torch.float32).to(self.device)  # Fixed input dimension to match fc1 output
+        self.fc3 = nn.Linear(2**4, 1, dtype=torch.float32).to(self.device)
+    def kern2ImagTransformer(self, input_tensor):
+        # batch_size,300,2047   k2s1
+        N, seq_len, num_filters = self.batch_size, 300, 2047
+        ## Create index mapping for placement
+        # indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
+        # indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
+
+        # Create the output tensor
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.complex64)
+
+        for i in range(num_filters):
+            # [orig,overlap_back]
+            # For each filter, map to positions 2i+1 and 2i+2
+            output_tensor[:, :, 2 * i + 1] = input_tensor[:, :, i]
+            output_tensor[:, :, 2 * i + 2] = input_tensor[:, :, i]
+
+        return output_tensor
+
+    def kern4ImagTransformer(self, input_tensor):
+        # batch_size,300,1023  k4s2
+        N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        for i in range(num_filters):
+            # Compute target indices for filter i
+            indices = [4 * i + 1, 4 * i + 3, 4 * i + 4, 4 * i + 6]
+            # Assign the input filter values as imaginary numbers to the output at the computed indices
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
+
+    def kern3ImagTransformer(self, input_tensor):
+        # batch_size,300,684     k3s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1]
+        # [,3][,5][,7]
+        # [][][]
+        # [][][]
+        # clip off the first filter at index 0
+        # output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
+        for i in range(1, 683):
+            indices = [6 * i - 3, 6 * i - 1, 6 * i + 1]  # 4089,4091,4093
+            output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
+
+        # cut off outlier filter at index 683
+        #        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
+        return output_tensor
+
+    def kern6ImagTransformer(self, input_tensor):
+
+        # Original tensor of shape (N, 300, 683)
+        # batch_size,300,683 k6s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
+        input_tensor = input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1][2,][4,][6,]
+        # [,3][,5][,7][8,][10,][12,]
+        # [][][][][][]
+        # [][][][][][]
+        # Outlier filter 0
+        output_tensor[:, :, [1, 2, 4, 6]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+        # Regular filters 1 to 682
+        for i in range(1, 682):  # 3,5,7, 8 , 10, 12
+            indices = [6 * i - 3, 6 * i - 1, 6 * i + 1, 6 * i + 2, 6 * i + 4, 6 * i + 6]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1,
+                                                                                           6)  # Make values imaginary
+        # 12:58.  1/23/25
+        # Outlier filter _4083, _4085, _4087, 4088_, 4090_, 4092_
+        # Outlier filter _4089, _4091, _4093, 4094_, __, __
+
+        output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(
+            -1)  # Make values imaginary
+        return output_tensor
+
+    def kern5ImagTransformer(self, input_tensor):
+        # batch_size,300,682 k5s3p0
+        N, embedding_dim, num_filters = self.batch_size, 300, 682
+
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
+
+        # Step 2: Assign imaginary values for outlier filter 0
+        output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+
+        # [,1][,3][,5][6,][8,]
+        # [,7][,9][,11][12,][14,]
+        # [,13] [,15] [,17] [18,] [20,]
+        # [,19][,21][,23][24,][26,]
+        for i in range(1, 682):
+            indices = [
+                6 * (i - 1) + 1,
+                6 * (i - 1) + 3,
+                6 * (i - 1) + 5,
+                6 * (i - 1) + 6,
+                6 * (i - 1) + 8
+            ]
+            output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+
+        return output_tensor
+
+    """def apply_pca(self, features):
+
+        batch, seq_len, D = features.shape
+        features_flat = features.reshape(-1, D)
+        #center the data using the precomputed global mean.
+        centered = features_flat - self.pca_mean  # self.pca_mean should have shape (D,)
+        #proj onto the PCA components.
+        projected = torch.matmul(centered, self.pca_components)  # shape: (batch*seq_len, num_components)
+        # Reshape back to (batch, seq_len, num_components)
+        return projected.reshape(batch, seq_len, self.num_components)"""
     def forward(self, x):
-        x = self.embed(x).permute(0, 2, 1)
+        # Ensure input is on correct device
+        x = x.to(self.device)
+        print(x.shape)
+        # Embedding
+        x = self.embed(x)
 
+        x = x.permute(0, 2, 1)
+        embedding_mat = x
         # CNN Layers
-        topk2 = self.kern2s1(x)
-        topk4 = self.kern4s2(x)
-        midk3 = self.kern3s3p1(x)
-        midk6 = self.kern6s3p1(x)
-        lowk5 = self.kern5s3(x)
+        topk2 = self.kern2ImagTransformer(self.kern2s1(x))
+        topk4 = self.kern4ImagTransformer(self.kern4s2(x))
+        midk3 = self.kern3ImagTransformer(self.kern3s3p1(x))
+        midk6 = self.kern6ImagTransformer(self.kern6s3p1(x))
+        lowk5 = self.kern5ImagTransformer(self.kern5s3(x))
 
-        # LSTM Outputs
-        upp_outputs, _ = self.uppLSTM(topk2.transpose(1, 2) + topk4.transpose(1, 2))
-        mid_outputs, _ = self.midLSTM(midk3.transpose(1, 2) + midk6.transpose(1, 2))
-        low_outputs, _ = self.lowLSTM(lowk5.transpose(1, 2))
+        def interleave_complex(complex_tensor):
+            real_part = complex_tensor.real
+            imag_part = complex_tensor.imag
+            batch_size, channels, seq_len = real_part.shape
 
-        # Apply PLA
-        def apply_pla(features):
-            # Compute covariance matrix
-            cov_matrix = features.T @ features
-            eigvals, eigvecs = torch.linalg.eigh(cov_matrix)
+            interleaved = torch.zeros(
+                batch_size,
+                channels * 2,
+                seq_len,
+                device=self.device,
+                dtype=torch.float32
+            )
+            print("reals and imag")
+            interleaved[:, 0::2, :] = real_part
+            interleaved[:, 1::2, :] = imag_part
+            return interleaved
+        def apply_pca(features):
+            batch,seq_len,D = features.shape
+            flattened   =   features.reshape(-1, D)
 
-            # Sort eigenvectors by eigenvalues in descending order
-            sorted_indices = torch.argsort(eigvals, descending=True)
-            top_k_eigvecs = eigvecs[:, sorted_indices[:self.num_components]]
+            centered    =   flattened   -   flattened.mean(dim=0,keepdim=True)
+            centered    =   centered.to(torch.float64)
+            #covariance matrix
+            cov_matrix = torch.matmul(centered.T, centered) / (features.shape[0] - 1)
 
-            # Project features onto top principal components
-            return features @ top_k_eigvecs
+            # Compute eigenvalues and eigenvectors
+            e_vals, e_vecs = torch.linalg.eigh(cov_matrix)
 
-        upp_features = apply_pla(upp_outputs.mean(dim=1))
-        mid_features = apply_pla(mid_outputs.mean(dim=1))
-        low_features = apply_pla(low_outputs.mean(dim=1))
+            sorted_indices = torch.argsort(e_vals, descending=True)
+            top_eigenvectors = e_vecs[:, sorted_indices[:self.num_components]]
 
-        # Combine PLA-reduced features (simple concatenation or addition)
-        fused = upp_features + mid_features + low_features  # Replace learned weights with direct combination
+            proj_evecsToCentered=torch.matmul(centered, top_eigenvectors).to(torch.float32)
+            return proj_evecsToCentered.reshape(batch, seq_len, self.num_components)
+        # Process complex combinations with interleaving and gradient tracking
+        upper_combined = topk2 + topk4
 
-        # Fully Connected Layers
-        swisher = F.silu(self.fc1(fused.mean(dim=1)))
+        upper_input =  apply_pca(interleave_complex(upper_combined).transpose(1, 2))
+        print(f"Low Layers into LSTM: {upper_input.shape}")
+
+        mid_combined = midk3 + midk6
+
+        mid_input =  apply_pca(interleave_complex(mid_combined).transpose(1, 2))
+        print(f"Mid Layers into LSTM: {mid_input.shape} ")
+
+        low_input =   apply_pca(interleave_complex(lowk5).transpose(1, 2))
+
+        print(f"Low Layers into LSTM: {low_input.shape}")
+        # Process through LSTMs
+        upp_out, _ = self.uppLSTM(upper_input)
+        print(f"upp done: {upp_out.shape}")
+        mid_out, _ = self.midLSTM(mid_input)
+        print(f"mid done: {mid_out.shape}")
+        low_out, _ = self.lowLSTM(low_input)
+        print(f"low done: {low_out.shape}")
+
+        #16 sum of the ordered e-values
+        #600,2048
+        #Norm Eq vs QR vs SVD
+        #find sparseness
+        #find max and min e-values to determine numer stability
+        #Should I trunacte the SVD?
+        #A^TA e-values by sorting each
+
+        print(mid_out.shape)
+        print(low_out.shape)
+
+        mean_lstm1 = upp_out.mean(dim=2)  # [16, 300]
+        mean_lstm2 = mid_out.mean(dim=2)  # [16, 300]
+        mean_lstm3 = low_out.mean(dim=2)  # [16, 300]
+        print(f"lstm shape: {mean_lstm1.shape}")
+        print(f"Embedding shape: {embedding_mat.shape}")
+
+        mean_embed = embedding_mat.mean(dim=1)  # [16, 2048]
+        print(f"mean_emb shape: {mean_embed.shape}")
+
+        fused = (self.weights[0] * mean_lstm1 +
+                 self.weights[1] * mean_lstm2 +
+                 self.weights[2] * mean_lstm3 +
+                 self.weights[3] * mean_embed)
+        print(f"fused shape: {fused.shape}")
+        """torch.Size([16, 2048, 300])
+        torch.Size([16, 2048, 300])
+        lstm
+        shape: torch.Size([16, 2048])
+        Embedding
+        shape: torch.Size([16, 300, 2048])
+        mean_emb
+        shape: torch.Size([16, 2048])
+        fused
+        shape: torch.Size([16, 2048])"""
+
+        # Final layers
+        swisher = F.silu(self.fc1(fused))
+        print(f"silu Done")
         dropout = self.dropout(swisher)
-        outputs = F.softmax(self.fc2(dropout), dim=1)
+        final_outputs = F.softmax(self.fc2(dropout), dim=1)
+        print(f"Almost Done")
 
-        return outputs
+        return torch.reshape(self.fc3(final_outputs), (16,)).squeeze()
 
         # noinspection PyUnreachableCode
-        print("""    def forward(self,x):
-        x   =   self.embed(x).permute(0,2,1)
-        embedding_tensor    =   torch.zeros(self.batch_size, embedding_dim, 512)
 
-        embedding_tensor[:, :, 1::2]    =   x
-        topk2   =   self.kern2s1(x)
-        transform_topk2 =   self.kern2ImagTransformer(topk2.transpose(1,2))
-        topk4   =   self.kern4s2(x)
-        transform_topk4 =   self.kern4ImagTransformer(topk4.transpose(1,2))
-        #upper   =   torch.cat([transform_topk2,transform_topk4],dim=-1)
-        upper   =   transform_topk2 +   transform_topk4
-        midk3=self.kern3s3p1(x)
-        transform_midk3 = self.kern3ImagTransformer(midk3.transpose(1,2))
-        midk6=self.kern6s3p1(x)
-        transform_midk6 = self.kern6ImagTransformer(midk6.transpose(1,2))
-        middle  =   transform_midk3 +   transform_midk6
-        lowk5 = self.kern5s3p1(x)
-        transform_lowk5 = self.kern5ImagTransformer(lowk5.transpose(1,2))
-        lower  =    embedding_tensor    +   transform_lowk5
-        upp_outputs,_ =   self.uppLSTM(upper)
-        mid_outputs,_ =   self.midLSTM(middle)
-        low_outputs,_ =   self.lowLSTM(lower)
-
-        pair12  =   upp_outputs +   mid_outputs
-        pair23  =   mid_outputs +   upp_outputs
-        pair13  =   low_outputs +   upp_outputs
-        trip    =   upp_outputs +   mid_outputs +   low_outputs
-
-        normedWeights   =   F.softmax(self.weights,dim=0)
+    def _forward_lstm(self,lstm,x):
+        return  lstm(x)
 
 
-
-        fused   =   torch.mean(normedWeights[0]    *   pair12,
-            normedWeights[1]    *   pair23,
-            normedWeights[2]    *   pair13,
-            normedWeights[3]    *   trip, dim=1)
-
-        even_cells = fused[:, 0::2, :]  # Select even indices
-        odd_cells = fused[:, 1::2, :]
-        crunched = torch.cat((even_cells, odd_cells), dim=-1)
-        swisher =   nn.SiLU(self.fc1(crunched))
-        dropOuts    =   self.dropout(swisher)
-        outputs =   F.softmax(self.fc2(dropOuts),dim=1)
-        return outputs""")
-
-
-
-
-    def kern2ImagTransformer(input_tensor):
-        # Original tensor of shape (N, 300, 255)
-        N, seq_len, num_filters = 4, 300, 255  # Example sizes
-        output_tensor=input_tensor.to(dtype=torch.complex64)
-        #input_tensor = torch.randn(N, seq_len, num_filters)  # Random data
+    def kern2ImagTransformer(self,  input_tensor):
+        #batch_size,300,2047   k2s1
+        N, seq_len, num_filters = self.batch_size, 300, 2047
         ## Create index mapping for placement
         #indices = torch.arange(255).unsqueeze(0) * 2 + 1  # Calculate (2i+1)
         #indices = indices.repeat(N, seq_len, 1)  # Repeat for batch and sequence
 
         # Create the output tensor
-        #output_tensor = torch.zeros(N, seq_len, 512)
+        output_tensor = torch.zeros(N, seq_len, 4096, dtype=torch.float32)
 
-        # Assign values
-        #output_tensor[:, :, 1:-1:2] = input_tensor  # Populate indices (2i+1)
-        #output_tensor[:, :, 2:-1:2] = input_tensor  # Populate indices (2i+2)
-        #
-        #
-        #
-        # Step 2: Assign values for each filter to the mapped indices
         for i in range(num_filters):
+            #[orig,overlap_back]
             # For each filter, map to positions 2i+1 and 2i+2
             output_tensor[:, :, 2*i+1] = input_tensor[:, :, i]
             output_tensor[:, :, 2*i+2] = input_tensor[:, :, i]
 
-        print(output_tensor.shape)  # Should be (N, 300, 512)
-        return output_tensor
 
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k2 Odds: {odds.shape}")
+        return  odds
     def kern4ImagTransformer(self,input_tensor):
-        # Original tensor of shape (N, 300, 127)
-        N, embedding_dim, num_filters = 4, 300, 127  # Example sizes
+        #batch_size,300,1023  k4s2
+        N, embedding_dim, num_filters = self.batch_size, 300, 1023  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
         for i in range(num_filters):
             # Compute target indices for filter i
             indices = [4*i+1, 4*i+3, 4*i+4, 4*i+6]
             # Assign the input filter values as imaginary numbers to the output at the computed indices
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
-        """# Step 3: Populate the indices for each filter, making values imaginary
-        for idx, i in enumerate(range(0, len(indices), 4)):
-            # Assign the input values to the imaginary part of the output tensor
-            output_tensor[:, :, indices[i:i+4]] = 1j * input_tensor[:, :, idx].unsqueeze(-1).repeat(1, 1, 4)
-        """
-        return output_tensor
-    def kern3Transformer(self,input_tensor):
-        # Original tensor of shape (N, 300, 86)
-        N, embedding_dim, num_filters = 16, 300, 86  # Example sizes
-        input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 256 * 2,dtype=torch.complex64)
 
-        #values for the outlier 0 filter
-        output_tensor[:, :, [1, 3]] = input_tensor[:, :, 0].unsqueeze(-1)
-        for i in range(1, 85):
-            indices = [6*i-1, 6*i+1, 6*i+3]
+        # split into odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k4 Odds: {odds.shape}")
+        return  odds
+    def kern3ImagTransformer(self,input_tensor):
+        #batch_size,300,684     k3s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 684  # Example sizes
+        input_tensor=input_tensor.to(dtype=torch.complex64)
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2,dtype=torch.complex64)
+        #[][][,1]
+        #[,3][,5][,7]
+        #[][][]
+        #[][][]
+        # clip off the first filter at index 0
+        #output_tensor[:, :, [1]] = input_tensor[:, :, 0].unsqueeze(-1)
+        for i in range(1, 683):
+            indices = [6*i-3, 6*i-1, 6*i+1]#4089,4091,4093
             output_tensor[:, :, indices] = input_tensor[:, :, i].unsqueeze(-1)
 
-        #values for the outlier 85 filter
-        output_tensor[:, :, [509, 511]] = input_tensor[:, :, 85].unsqueeze(-1)
-        return output_tensor
+        #cut off outlier filter at index 683
+#        output_tensor[:, :, [4095]] = input_tensor[:, :, 683].unsqueeze(-1)
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k3 Odds: {odds.shape}")
+        return  odds
     def kern6ImagTransformer(self,input_tensor):
 
-        # Original tensor of shape (N, 300, 85)
-        N, embedding_dim, num_filters = 16, 300, 85  # Example sizes
+        # Original tensor of shape (N, 300, 683)
+        #batch_size,300,683 k6s3p2
+        N, embedding_dim, num_filters = self.batch_size, 300, 683  # Example sizes
         input_tensor=input_tensor.to(dtype=torch.complex64)
-        output_tensor = torch.zeros(N, embedding_dim, 256 * 2, dtype=torch.complex64)
-
+        output_tensor = torch.zeros(N, embedding_dim, 2048 * 2, dtype=torch.complex64)
+        # [][][,1][2,][4,][6,]
+        # [,3][,5][,7][8,][10,][12,]
+        # [][][][][][]
+        # [][][][][][]
         # Outlier filter 0
-        output_tensor[:, :, [1, 3, 4, 6, 8]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
-
-        # Regular filters 1 to 83
-        for i in range(1, 84):
-            indices = [6*i-1, 6*i+1, 6*i+3, 6*i+4, 6*(i+1), 6*(i+1)+2]
+        output_tensor[:, :, [1, 2, 4, 6]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)  # Make values imaginary
+        # Regular filters 1 to 682
+        for i in range(1, 682):#3,5,7, 8 , 10, 12
+            indices = [6*i-3, 6*i-1, 6*i+1, 6*i+2, 6*i+4,6*i+6]
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1).repeat(1, 1, 6)  # Make values imaginary
+#12:58.  1/23/25
+        # Outlier filter _4083, _4085, _4087, 4088_, 4090_, 4092_
+        # Outlier filter _4089, _4091, _4093, 4094_, __, __
 
-        # Outlier filter 84
-        output_tensor[:, :, [503, 505, 507, 508, 510]] = 1j * input_tensor[:, :, 84].unsqueeze(-1)  # Make values imaginary
-        return output_tensor
+        output_tensor[:, :, [4089, 4091, 4093, 4094]] = 1j * input_tensor[:, :, 682].unsqueeze(-1)  # Make values imaginary
+
+        #split to odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k6 Odds: {odds.shape}")
+        return  odds
     def kern5ImagTransformer(self,input_tensor):
-        """
-        Transform input tensor of shape (N, 300, 86) into (N, 300, 512)
-        with specified index mapping, making all assigned values imaginary.
-        """
-        # Get dimensions of the input tensor
-        N, seq_len, num_filters = input_tensor.shape
+        #batch_size,300,682 k5s3p0
+        N, embedding_dim, num_filters = self.batch_size, 300, 682
 
-        # Step 1: Create an output tensor of zeros with shape (N, 300, 512), as complex type
-        output_tensor = torch.zeros(N, seq_len, 512, dtype=torch.complex64)
+        # Step 1: Create an output tensor of zeros with shape (N, 300, 4096), as complex type
+        output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64)
 
         # Step 2: Assign imaginary values for outlier filter 0
         output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
 
-        # Step 3: Assign imaginary values for regular filters 1 to 84
-        for i in range(1, 85):
+        #[,1][,3][,5][6,][8,]
+        #[,7][,9][,11][12,][14,]
+        #[,13] [,15] [,17] [18,] [20,]
+        #[,19][,21][,23][24,][26,]
+        for i in range(1, 682):
             indices = [
-                6 * (i - 1) + 2,
-                6 * (i - 1) + 4,
-                6 * (i - 1) + 7,
-                6 * (i - 1) + 9,
-                6 * (i - 1) + 11
+                6 * (i - 1) + 1,
+                6 * (i - 1) + 3,
+                6 * (i - 1) + 5,
+                6 * (i - 1) + 6,
+                6 * (i - 1) + 8
             ]
             output_tensor[:, :, indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
 
-        # Step 4: Assign imaginary values for outlier filter 85
-        output_tensor[:, :, [506, 508, 511]] = 1j * input_tensor[:, :, 85].unsqueeze(-1)
-
-        return output_tensor
-
-
-
-#cutesry
-"""class   initialSentModel(nn.Module):
-    def __init__(self,vocab_size,embedding_dim,hidden_units,pre_train_embeds):
-        super(initialSentModel,    self).__init__()
-        self.recurrDropout =   0.25
-        self.embedding = nn.Embedding.from_embedding(pre_train_embeds,freeze=False)
-                #max_norm (float, optional) – See module initialization documentation.
-                #norm_type (float, optional) – See module initialization documentation. Default 2.
-                #scale_grad_by_freq (bool, optional) – See module initialization documentation. Default False.
-                #sparse (bool, optional) – See module initialization documentation.
-        self.lstm1 = nn.LSTM(300, 512, batch_first=True,bidirectional=True)
-        self.lstm2 = nn.LSTM(512, 256, batch_first=True, bidirectional=True)
-"""
-
-"""
-def preprocess_data(data_iter, vocab, max_tokens):
-    preprocessed = []
-    padding_idx = 0
-    print(dir(data_iter))
-    print(type(data_iter))
-    for label, text in data_iter:
-        print(label)
-        tokenized_text = token_retriever(text)
-        token_ids = vocab(tokenized_text)[:max_len]
-        padding_needed = max_tokens - len(token_ids)
-        left_padding = padding_needed // 2
-        right_padding = padding_needed - left_padding  # Handle odd-length padding
-
-        padded_text = [padding_idx] * left_padding + token_ids + [padding_idx] * right_padding
-        preprocessed.append((torch.tensor(padded_text, dtype=torch.long),
-                             torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)))"""
-
+#split to odds
+        odds    =   output_tensor[:,:,1::2]
+        print(f"k5 Odds: {odds.shape}")
+        return  odds
 
 
 def process_dataset(combined_dataset=Dataset):
@@ -282,262 +489,362 @@ def process_dataset(combined_dataset=Dataset):
     val_size    = int(total_size * 0.2)
     test_size = int(total_size * 0.1)
     tokenizer = get_tokenizer("basic_english")
-
-    train_dSet, test_dSet,val_dSet = random_split(combined_dataset, [train_size,val_size, test_size])
+#tokenizer
 
     def yield_tokens(data_iter):
-        for label, text in data_iter:
-            if isinstance(text, str):
-                yield tokenizer(text)
-            elif isinstance(text, list):
-                yield data_iter
-            else:
-                raise ValueError("Unexpected text format. Expected string or list of tokens.")
-    trained_vocab   =   build_vocab_from_iterator(yield_tokens(train_dSet),
-    specials=["<unk>", "<pad>"],
-    special_first=True)
-    trained_vocab.set_default_index(trained_vocab["<unk>"])
+        for text, label in data_iter:
+            yield tokenizer(text)
 
     def text_pipeline(text):
-        tokens = tokenizer(text)
-        indices = [trained_vocab[token] for token in tokens]
-        return torch.tensor(indices, dtype=torch.long)
+        return tokenizer(text)
 
         #return torch.tensor(tokenizer(text), dtype=torch.int64)
 
     def label_pipeline(label):
         if isinstance(label, str):
             if label == "pos":
-                return torch.tensor(1, dtype=torch.float)
+                return torch.tensor(1, dtype=torch.float32)
             elif label == "neg":
-                return torch.tensor(0, dtype=torch.float)
+                return torch.tensor(0, dtype=torch.float32)
             else:
                 raise ValueError(f"Unexpected label: {label}")
         elif isinstance(label, int) or label.isdigit():
-            return torch.tensor(float(int(label) - 1), dtype=torch.float)
+            return torch.tensor(float(int(label) - 1), dtype=torch.float32)
         else:
-            raise ValueError(f"Unsupported label: {label} of type {type(label)}")
+            raise ValueError(f"Unsupported label type: {label}")
     def pipeline_driver(raw_data_split):
-        #max_len = max(text_pipeline(txt).size(0) for _, txt in raw_data_split)
-#        print(raw_data_split(0))
-        print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
-        return  [(label_pipeline(label),text_pipeline(text))
-                 for label, text in raw_data_split]
+
+        print(f"Max Len:     {max([len(text_pipeline(text)) for text,_ in raw_data_split])}")
+        #print(f"   {max([len(text_pipeline(text)) for _, text in raw_data_split])}")
+        print(f"# of too big:{sum(len(text_pipeline(text)) > 2048 for text, _ in raw_data_split)}")
+        return  [(text_pipeline(text),label_pipeline(label))
+                 for text, label in raw_data_split
+        ]
 
     # Create train and test datasets with random split
+    train_dSet, test_dSet,val_dSet = random_split(combined_dataset, [train_size,val_size, test_size])
     #train_size =   25000+25000//split_1 or 50000*0.7
     #test_size   =   25000(1-1//split_1) or 50000*0.1
     #val_size   =   25000(8/10-2/5) or 50000*0.2
 
     # Preprocess all datasets using label and text pipelines
-    return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet)),   trained_vocab
+    return (train_dSet, val_dSet, test_dSet), (pipeline_driver(train_dSet),pipeline_driver(val_dSet),pipeline_driver(test_dSet))
 
-if __name__ == "__main__":
-    #params
-    max_len = 256
-    padding_type = 'post'
-    vocab_size = 65536
-    embedding_dim = 300
+def filter_large_samples(dataset, tokenizer, max_tokens=2048):
+    filtered_data = []
+    for item in dataset:
+        text, label = item  # Assuming each item is a (text, label) tuple
+        tokenized_text = tokenizer(text)  # Tokenize the text
+        #print(tokenized_text)
+        if len(tokenized_text) <= max_tokens:
+            filtered_data.append(item)
+    return filtered_data
+def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
+    return [(text, label) for text, label in data if len(text) <= max_tokens]
+def collate_batch(batch):
+    # Unpack the batch into labels and texts
+    texts, labels = zip(*batch)
+    max_length = 2048#4096
+    # Convert labels to tensors
+    labels = torch.tensor(labels)
 
-    # hypers
-    batch_size = 16
-    epoch_count = 15
-    learning_rate = 0.004
-    min_lr = 0.0005
+    # Tokenize texts
+    tokenized_texts = [token_retriever(text) for text in texts]
 
-    token_retriever = get_tokenizer("basic_english")
+    # Numericalize tokens
 
+    numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
+    if len(numericalized_texts[0]) < max_length:
+        numericalized_texts[0] = torch.cat(
+            [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
+        )
+    else:
+        numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
+    padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
 
-    def yield_tokens(data_iter):
-        for _, text in data_iter:
-            if isinstance(text, str):  # If `text` is raw text
-                print(token_retriever(text))
-                yield token_retriever(text)
-            elif isinstance(text, list):  # If `text` is already tokenized
-                yield text  # Use it directly without tokenizing again
-            else:
-                raise ValueError("Unexpected text format. Expected string or list of tokens.")
+    # Calculate text lengths
+    text_lengths = [len(tokens) for tokens in numericalized_texts]
 
-
-    # Custom iterwrapper
-    class redoneTupleDataset(Dataset):
-        def __init__(self, data):
-            self.data = list(data)  # Convert iterable to a list for indexing
-
-        def __len__(self):
-            return len(self.data)
-
-        def __getitem__(self, idx):
-            label,  text    = self.data[idx]
-            return  label,  text
-
-    # Convert the datasets into PyTorch Dataset objects
-    iter1 = IMDB(root=".data", split='train')
-    iter2 = IMDB(root=".data", split='test')
-    iter1_wrapped = redoneTupleDataset(iter1)
-    iter2_wrapped = redoneTupleDataset(iter2)
+    return padded_texts,labels#, text_lengths
 
 
-    glove = GloVe(name="6B", dim=embedding_dim)
-    glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-    GloVe_itos = []
+max_len = 2048
+padding_type = 'post'
+vocab_size = 130000
+embedding_dim = 300
 
-    # Combine them into one dataset https://discuss.pytorch.org/t/how-does-concatdataset-work/60083
-    combined_dataset = ConcatDataset([iter1_wrapped, iter2_wrapped])
-    (train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data),   trained_vocab    =   process_dataset(combined_dataset)
-    pad_idx = trained_vocab["<pad>"]
+batch_size = 16
+epoch_count = 7
+learning_rate = 0.004
+min_lr = 0.0005
 
-    trained_vocab_size = int(len(trained_vocab.get_stoi())//2+1)
-#finish vocab tomorrow 1/9
+token_retriever = get_tokenizer("basic_english")
+#get t
 
-    glove_path = os.path.expanduser("C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
-    GloVe_itos = []
-
-    """"# Read the GloVe file to extract tokens
-    with open(glove_path, "r", encoding="utf-8") as f:
-        for line in f:
-            token = line.split()[0]  # First element is the token
-            GloVe_itos.append(token)
-    #GloVe_itos  =   GloVe.Vocab.get_itos()
-    """
-    #stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+def yield_tokens(data_iter):
+    for text,label in data_iter:
+        if isinstance(text, str):  # If `text` is raw text
+            yield token_retriever(text)
+        elif isinstance(text, list):  # If `text` is already tokenized
+            yield text  # Use it directly without tokenizing again
+        else:
+            raise ValueError("Unexpected text format. Expected string or list of tokens.")
 
 
-    # Simulate a vocabulary of size `vocab_size`
-    # Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
-    # "<unk>" and "<pad>" are added for unknown tokens and padding
-    print(dir(glove))
-    #vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
+class RedoneTupleDataset(Dataset):
+    def __init__(self, original_dataset):
+        self.data = []
+        for item in original_dataset:  # torchtext IMDB returns (label, text) tuples
+            self.data.append((str(item['text']), int(item['label'])))  # Swap order to match your expected format
 
-    # Create vocab-to-index mapping
-    #word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
-#absurdly big auauauaua 100000000
-    pretrained_vectors = torch.zeros((10000000, embedding_dim))
-    # fix the vocab and use glove pretraining
+    def __len__(self):
+        return len(self.data)
 
-    for word, idx in trained_vocab.get_stoi().items():
-        if word in glove.stoi:  # Check if word is in GloVe's vocabulary
-            #pretrained_vectors[idx] = stoi[word]
+    def __getitem__(self, idx):
+        return self.data[idx]
 
-            pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float)
-        elif word == "<pad>":  # Padding vector (optional, all zeros by default)
-            pretrained_vectors[idx] = torch.zeros(embedding_dim)
-        else:  # For OOV words (e.g., "<unk>")
-            pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
 
-    # Create PyTorch Embedding Layer
-    embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
+# Convert the datasets into PyTorch Dataset objects
 
-    def collate_batch(batch):
-        #after separately pipelining, zip
-        labels,texts = zip(*batch)
-        labels = torch.stack([torch.tensor(label) for label in labels])
-        text_lengths = [len(text) for text in texts]
-        token_tensors   =   []
-        for txt in texts:
-            tokens = token_retriever(txt)
-            ids = [trained_vocab[t] for t in tokens]
-            token_tensors.append(torch.tensor(ids, dtype=torch.long))
-        texts   =   pad_sequence(token_tensors, batch_first=True, padding_value=pad_idx)
-        return  labels, texts, text_lengths
+iter1   =   load_dataset('imdb',split='train')
+iter1   =   list(iter1)
+iter2   =   list(load_dataset('stanfordnlp/imdb',split='test'))
+# Create wrapped datasets
 
-    dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True,shuffle=True,    collate_fn=collate_batch)
-    dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True,shuffle=True,    collate_fn=collate_batch)
-    dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True,shuffle=True,  collate_fn=collate_batch)
-    #inst_test = IMDB(split="test")
-    """
-    class   IMDBDataset(Dataset):
-        def __init__(self, dataset, tokenizer,vocab):
-            self.dataset = dataset
-            self.tokenizer = tokenizer
-            self.vocab = vocab
+train_wrapped = RedoneTupleDataset(iter1)
+test_wrapped = RedoneTupleDataset(iter2)
+combined_dataset = ConcatDataset([train_wrapped, test_wrapped])
 
-        def __len__(self):
-            return len(self.dataset)
-        def __getitem__(self, idx):
-            label,text  =   self.dataset[idx]
+glove = GloVe(name='6B', dim=embedding_dim)
+glove_path = os.path.expanduser(
+    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+GloVe_itos = glove.itos
+(train_dSet, val_dSet, test_dSet), (train_data, val_data, test_data) = process_dataset(combined_dataset)#take out the big ones
 
-            label_tensor = torch.tensor(1.0 if label == "pos" else 0.0, dtype=torch.float)
-            text_tokens = self.tokenizer(text)
-            text_tensor = torch.tensor([self.vocab[token] for token in text_tokens],dtype=torch.float)
-            return  text_tensor, label_tensor
-    imdbDataset =   IMDBDataset(inst_train, token_retriever, stoi)
-    
+print(f"Train dataset size: {len(train_dSet)}")
+print(f"Validation dataset size: {len(val_dSet)}")
+print(f"Test dataset size: {len(test_dSet)}")
 
-        text_list, label_list = [],[]
-        for text, label in batch:
-            text_list.append(text)
-            label_list.append(label)
-        text_padded =   pad_sequence(text_list, batch_first=True,   padding_value=stoi['<pad>'])
-        labels  =   torch.tensor(label_list, dtype=torch.float)
-        return text_padded, labels"""
-#this one
-    all_texts   =   []
+
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples(dataset, tokenizer, max_tokens=2048):
+    filtered_data = []
+    for item in dataset:
+        text, label = item  # Assuming each item is a (text, label) tuple
+        tokenized_text = tokenizer(text)  # Tokenize the text
+        #print(tokenized_text)
+        if len(tokenized_text) <= max_tokens:
+            filtered_data.append(item)
+    return filtered_data
+
+# Applying the filtering function to each dataset
+
+tokenizer = get_tokenizer("basic_english")  # Use a tokenizer that fits your dataset
+train_dSet_filtered = filter_large_samples(train_dSet, tokenizer)
+val_dSet_filtered = filter_large_samples(val_dSet, tokenizer)
+test_dSet_filtered = filter_large_samples(test_dSet, tokenizer)
+
+# Wrap the filtered datasets into PyTorch Dataset objects
+train_dSet = train_dSet_filtered
+val_dSet = val_dSet_filtered
+test_dSet = test_dSet_filtered
+
+#filter out samples with text lengths greater than 2048 tokens
+def filter_large_samples_regular(data, tokenizer, max_tokens=2048):
+    return [(text, label) for text, label in data if len(text) <= max_tokens]
+
+train_data_filtered = filter_large_samples_regular(train_data, tokenizer)
+val_data_filtered = filter_large_samples_regular(val_data, tokenizer)
+test_data_filtered = filter_large_samples_regular(test_data, tokenizer)
+
+# Replace original data with filtered data
+train_data = train_data_filtered
+val_data = val_data_filtered
+test_data = test_data_filtered
+
+vocab_size = 130000#int(len(vocab.get_stoi()) // 2 + 1)
+vocab = build_vocab_from_iterator(yield_tokens(train_data), specials=["<unk>", "<pad>"],special_first=True
+                                  ,max_tokens=vocab_size)
+#vocab.set_default_index(vocab["<unk>"])
+#vocab.unk_count = vocab['<unk>']
+pad_idx = vocab['<pad>']
+unk_idk =   vocab['<unk>']
+#if '<pad>' not in vocab:
+ #   vocab['<pad>'] = len(vocab)
+#if '<unk>' not in vocab:
+#    vocab['<unk>'] = len(vocab)+1f
+
+glove_path = os.path.expanduser(
+    "C:\\Users\\epw268\\Documents\\GitHub\\realtime-reddit-sentiments\\.vector_cache\\glove.6B.300d.txt")  # Adjust for your cache path
+GloVe_itos = []
+
+
+# stoi = {word: idx for idx, word in enumerate(GloVe_itos)}  # String-to-index mapping
+
+
+# Simulate a vocabulary of size `vocab_size`
+# Assuming the vocabulary is sorted by frequency (common practice in NLP tasks)
+# "<unk>" and "<pad>" are added for unknown tokens and padding
+print(dir(glove))
+# vocab_list = ["<pad>", "<unk>"] + list(stoi.keys())[:vocab_size - 2]
+
+# Create vocab-to-index mapping
+# word_to_index = {word: idx for idx, word in enumerate(vocab_list)}
+
+pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
+# fix the vocab and use glove pretraining
+print(f"Max idx: {max(vocab.get_stoi().values())}")#.get_stoi
+print(f"pretrained_vectors: {pretrained_vectors.shape}")
+for word, idx in vocab.get_stoi().items():
+    if word in glove.stoi:  # Check if word is in GloVe's vocabulary
+        # pretrained_vectors[idx] = stoi[word]
+        pretrained_vectors[idx] = torch.tensor(glove.stoi[word], dtype=torch.float32)
+    elif word == "<pad>":  # Padding vector (optional, all zeros by default)
+        pretrained_vectors[idx] = torch.zeros(embedding_dim)
+    else:  # For OOV words (e.g., "<unk>")
+        pretrained_vectors[idx] = torch.rand(embedding_dim)  # Random initialization
+
+# Create PyTorch Embedding Layer
+embedding_layer = torch.nn.Embedding.from_pretrained(pretrained_vectors, freeze=False)  # freeze=False to fine-tune
+
+def collate_batch(batch):
+    # Unpack the batch into labels and texts
+    texts, labels = zip(*batch)
+    max_length = 2048#4096
+    # Convert labels to tensors
+    labels = torch.tensor(labels)
+
+    # Tokenize texts
+    tokenized_texts = [token_retriever(text) for text in texts]
+
+    # Numericalize tokens
+
+    numericalized_texts = [torch.tensor(vocab.lookup_indices(list(tokens))) for tokens in tokenized_texts]
+    if len(numericalized_texts[0]) < max_length:
+        numericalized_texts[0] = torch.cat(
+            [numericalized_texts[0], torch.full((max_length - len(numericalized_texts[0]),), pad_idx)]
+        )
+    else:
+        numericalized_texts[0] = numericalized_texts[0][:max_length]    # Pad sequences
+    padded_texts = pad_sequence(numericalized_texts, batch_first=True, padding_value=pad_idx)
+
+    # Calculate text lengths
+    text_lengths = [len(tokens) for tokens in numericalized_texts]
+
+    return padded_texts,labels#, text_lengths
+
+
+dLoad_train = DataLoader(train_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_val = DataLoader(val_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+dLoad_test = DataLoader(test_dSet, batch_size=batch_size, drop_last=True, shuffle=True, collate_fn=collate_batch,pin_memory=False)
+def main():    # Rest of your code remains the same
+
+    # inst_test = IMDB(split="test")
+
+    # this one
+    all_texts = []
     all_labels = []
-    for label_batch, text_batch,    length_batch in dLoad_train:
+
+    for text_batch,label_batch in dLoad_train:
         all_texts.append(text_batch)
         all_labels.append(label_batch)
-    #TRIAL PIECE
+    # TRIAL PIECE
     all_labels = [label[0] if isinstance(label, tuple) else label for label in all_labels]
     if all(isinstance(label, torch.Tensor) for label in all_labels):
         train_labels_tensor = torch.cat(all_labels, dim=0)
     else:
         raise TypeError("All elements in `all_labels` must be tensors.")
-    #END OF TRIAL PIECE
-    train_texts_tensor = torch.cat(all_texts,dim=0)
-    train_labels_tensor = torch.cat(all_labels,dim=0)
+    # END OF TRIAL PIECE
+    #print(all_texts)
+    text_shapes =   [text.shape   for  text in all_texts]
+    #print(text_shapes)
+    #dim_problems
 
+    train_texts_tensor = torch.cat(all_texts, dim=0)
+    train_labels_tensor = torch.cat(all_labels, dim=0)
+    print(f"Average Label Mag: {torch.mean(train_labels_tensor.float())}")
 
-    print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
-    print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
+    #print(str(type(dLoad_train)) + ".trainer    |.    " + str(dir(dLoad_train)))
+    #print(str(type(dLoad_test)) + ".    |.    " + str(dir(dLoad_test)))
 
     """def yield_token(data_iter):
         for _, text in data_iter:
             yield token_retriever(text)"""
 
+    # Training setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = CNNToLSTMCustomInterleaving(vocab_size, 300, pretrained_vectors,
+                                        batch_size, int(2048)).to(device)
 
-    model = cnnToLSTMCustom(vocab_size,300,pretrained_vectors,batch_size)#SentimentAnalysisModel(vocabulary_size, embedding_size, lstm_size, max_words)
 
-    # Define loss and optimizer
-    criterion = nn.BCELoss()
+
+
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Train the model
-
+    # Training loop with progress tracking
+    print(f"Starting training on {device}")
     model.train()
     for epoch in range(epoch_count):
-        for inputs, labels in dLoad_train:
-            outputs = model(inputs).squeeze()
-            loss = criterion(outputs, labels)
+        epoch_loss = 0
+        progress_bar = tqdm(dLoad_train, desc=f'Epoch {epoch + 1}/{epoch_count}')
 
+        for batch_idx, (inputs, labels) in enumerate(progress_bar):
+            print(f"Input Just Into Model: {inputs}")
+            inputs, labels = inputs.to(device), labels.to(device)
+            print(f"Inputs Into Model Shape: {inputs.shape}")
+            print(f"Batch {batch_idx}: ")
+            # forward
+            outputs = model(inputs)
+            loss = criterion(outputs, labels.float()).to(torch.float64)
+            # backward
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print(f'Epoch {epoch + 1}/{epoch_count}, Loss: {criterion.item()}')
 
-    # Validate the model
+            epoch_loss += loss.item()
+
+            # Update progress bar
+            progress_bar.set_postfix({'batch_loss': f'{loss.item():.4f}',
+                                      'avg_loss': f'{epoch_loss / (batch_idx + 1):.4f}'})
+
+        print(f'Epoch {epoch + 1}/{epoch_count}, Average Loss: {epoch_loss / len(dLoad_train):.4f}')
+
+    # Validation with progress tracking
+    print("\nStarting validation...")
     model.eval()
     val_loss = 0
     val_accuracy = 0
     with torch.no_grad():
-        for inputs, labels in dLoad_val:
-            outputs = model(inputs).squeeze()
+        for inputs, labels in tqdm(dLoad_val, desc='Validation'):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
             loss = criterion(outputs, labels)
             val_loss += loss.item()
             val_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+
     val_loss /= len(dLoad_val)
     val_accuracy /= len(dLoad_val)
-    print('Validation Loss:', val_loss)
-    print('Validation Accuracy:', val_accuracy)
+    print(f'Validation Loss: {val_loss:.4f}')
+    print(f'Validation Accuracy: {val_accuracy:.4f}')
 
-    # Evaluate the model on the test set
+    # Test evaluation with progress tracking
+    print("\nStarting test evaluation...")
     test_accuracy = 0
     with torch.no_grad():
-        for inputs, labels in dLoad_test:
-            outputs = model(inputs).squeeze()
+        for inputs, labels in tqdm(dLoad_test, desc='Testing'):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
             test_accuracy += ((outputs > 0.5) == labels).float().mean().item()
+
     test_accuracy /= len(dLoad_test)
-    print('Test Accuracy:', test_accuracy)
+    print(f'Test Accuracy: {test_accuracy:.4f}')
 
     # Save the model
     torch.save(model.state_dict(), 'sentiment_model.pth')
+
+
+if __name__ == '__main__':
+    main()
+    # Save the model
