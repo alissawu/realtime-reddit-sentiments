@@ -1,0 +1,97 @@
+name: pytorch_gpu
+channels:
+  - pytorch          # official PyTorch wheels
+  - nvidia           # CUDA meta-packages
+  - conda-forge      # community science stack
+  - defaults
+dependencies:
+  # ---- Python runtime ----
+  - python=3.10
+
+  # ---- PyTorch & CUDA ----
+  - pytorch=2.4.1
+  - torchvision=0.19.1
+  - torchaudio=2.4.1
+  - pytorch-cuda=12.4          # pulls matching CUDA libs
+  - cudatoolkit=12.4
+  - cudnn>=8.9,<9.0
+
+  # ---- Core data-science stack ----
+  - numpy>=1.26,<1.27
+  - pandas>=2.2,<2.3
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+
+  # ---- Data loading / NLP ----
+  - torchdata=0.8.0            # replaces torchtext ≥ 2.4
+  - nltk
+  - textblob
+
+  # ---- Hugging Face ecosystem ----
+  - datasets>=2.14.0
+  - huggingface_hub>=0.17.0
+  - tokenizers>=0.13.3
+  - transformers>=4.30.0
+
+  # ---- Web & API ----
+  - flask
+  - gunicorn
+  - requests
+  - aiohttp
+
+  # ---- Storage / I/O ----
+  - pyarrow>=14.0.0
+  - dill
+  - filelock
+  - fsspec
+  - pyyaml
+
+  # ---- Performance ----
+  - numexpr
+  - bottleneck
+
+  # ---- Utilities ----
+  - tqdm
+  - click
+  - joblib
+
+  # ---- Jupyter / Dev tooling ----
+  - jupyter
+  - ipython
+  - ipykernel
+
+  # ---- AWS SDK ----
+  - boto3
+  - awscli
+
+  # ---- Experiment tracking ----
+  - tensorboard
+  - mlflow
+
+  # ---- Imaging / CV ----
+  - pillow
+  - opencv                   # conda-forge build
+
+  # ---- Lint / static-type ----
+  - mypy
+  - black
+  - flake8
+
+  # ---- Pip fall-backs ----
+  - pip
+  - pip:
+      - praw>=7.8.0
+      - prawcore>=2.4.0
+      - python-dotenv
+      - accelerate>=0.20.0
+      - safetensors
+      - sentencepiece
+      - protobuf
+      - packaging>=20.9
+      - regex
+      - multiprocess
+      # distributed / mixed-precision tooling
+      - deepspeed
+      - fairscale
