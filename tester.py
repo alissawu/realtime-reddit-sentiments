@@ -1,6 +1,22 @@
 #pytorch 2.6
 #python 3.11
+import re
+import gensim.downloader as api
+print("Downloading 100D GloVe vectors...")
+glove_vectors = api.load("glove-wiki-gigaword-100")
 
+
+def basic_tokenizer(text: str) -> list[str]:
+    # Lowercase the text
+    text = text.lower()
+    # Add spaces around punctuation we want to isolate
+    for punct in ["'", ".", ",", "(", ")", "!", "?", ";", ":"]:
+        text = text.replace(punct, f" {punct} ")
+    text = text.replace('"', "")           # remove double quotes
+    text = text.replace("<br />", " ")     # replace HTML line breaks with space
+    # Split on whitespace
+    tokens = text.split()
+    return tokens
 
 import os
 import torch
@@ -12,8 +28,12 @@ from torch.utils.data import DataLoader, Dataset, random_split, ConcatDataset
 from torch.amp import autocast, GradScaler
 
 # Updated imports for newer versions
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import build_vocab_from_iterator, GloVe
+#from torchtext.data.utils import get_tokenizer
+#from torchtext.vocab import #build_vocab_from_iterator, GloVe
+
+
+
+
 from datasets import load_dataset
 from tqdm import tqdm
 import numpy as np
@@ -29,7 +49,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         super().__init__()
         self.max_len = max_len
         self.batch_size = batch_size
-        self.num_components = 300
+        self.num_components = 100
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Initialize embedding layer with float32
@@ -246,9 +266,31 @@ class IMDBDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.data[idx]
+class Vocab:
+    def __init__(self, stoi: dict):
+        self.stoi = stoi
+        self.itos = {idx: tok for tok, idx in stoi.items()}
+        self.default_index = stoi["<unk>"] if "<unk>" in stoi else None
+    def __len__(self):
+        return len(self.stoi)
+    def __getitem__(self, token: str):
+        # Return index if in vocab, else the default <unk>
+        if token in self.stoi:
+            return self.stoi[token]
+        elif self.default_index is not None:
+            return self.default_index
+        else:
+            raise KeyError(f"Token '{token}' not in vocab")
+    def get_stoi(self):
+        return self.stoi
+    def set_default_index(self, idx: int):
+        self.default_index = idx
+    def __call__(self, tokens: list[str]) -> list[int]:
+        # Convert list of tokens to list of indices
+        return [self.__getitem__(tok) for tok in tokens]
 
 
-def load_glove_embeddings(vocab, embedding_dim=300, cache_dir=None):
+def load_glove_embeddings(vocab, embedding_dim=100, cache_dir=None):
     """Load GloVe embeddings with proper caching"""
     if cache_dir is None:
         cache_dir = Path.home() / '.vector_cache'
@@ -261,26 +303,27 @@ def load_glove_embeddings(vocab, embedding_dim=300, cache_dir=None):
         glove = GloVe(name='6B', dim=embedding_dim)
 
     # Create embedding matrix
+    embedding_dim = 100  # using 100d GloVe
     vocab_size = len(vocab)
-    pretrained_vectors = torch.zeros((vocab_size, embedding_dim))
-
+    pretrained_embeddings = torch.zeros((vocab_size, embedding_dim), dtype=torch.float32)
     for word, idx in vocab.get_stoi().items():
-        if word in glove.stoi:
-            pretrained_vectors[idx] = glove[word]
+        if word in glove_vectors:
+            pretrained_embeddings[idx] = torch.tensor(glove_vectors[word], dtype=torch.float32)
         elif word == "<pad>":
-            pretrained_vectors[idx] = torch.zeros(embedding_dim)
-        else:  # OOV words including <unk>
-            pretrained_vectors[idx] = torch.randn(embedding_dim) * 0.1
+            pretrained_embeddings[idx] = torch.zeros(embedding_dim)  # pad -> zero vector
+        else:
+            # OOV token: random vector
+            pretrained_embeddings[idx] = torch.randn(embedding_dim) * 0.1
 
-    return pretrained_vectors
+    return pretrained_embeddings
 
 
 def create_data_loaders(batch_size=16, max_len=2048, vocab_size=130000):
     """Create data loaders with proper preprocessing"""
     # Load datasets
     print("Loading IMDB dataset...")
-    train_data = load_dataset('imdb', split='train')
-    test_data = load_dataset('imdb', split='test')
+    train_data = load_dataset('stanfordnlp/imdb', split='train')
+    test_data = load_dataset('stanfordnlp/imdb', split='test')
 
     # Combine and prepare data
     all_data = []
@@ -290,7 +333,7 @@ def create_data_loaders(batch_size=16, max_len=2048, vocab_size=130000):
         all_data.append((item['text'], item['label']))
 
     # Initialize tokenizer
-    tokenizer = get_tokenizer("basic_english")
+    tokenizer = basic_tokenizer
 
     # Filter long sequences
     filtered_data = []
@@ -320,37 +363,43 @@ def create_data_loaders(batch_size=16, max_len=2048, vocab_size=130000):
         for text, _ in data_iter:
             yield tokenizer(text)
 
-    vocab = build_vocab_from_iterator(
-        yield_tokens(train_data),
-        specials=["<unk>", "<pad>"],
-        special_first=True,
-        max_tokens=vocab_size
-    )
-    vocab.set_default_index(vocab["<unk>"])
+    from collections import Counter
+    counter = Counter()
+    for text, _ in train_data:  # iterate over training split
+        tokens = basic_tokenizer(text)
+        counter.update(tokens)
+
+    # Build vocabulary of most common tokens
+    special_tokens = ["<unk>", "<pad>"]
+    vocab_size = 130000
+    most_common = counter.most_common(vocab_size - len(special_tokens))
+    # Start vocabulary with special tokens
+    stoi = {tok: idx for idx, tok in enumerate(special_tokens)}
+    for token, _ in most_common:
+        if token not in stoi:  # avoid any overlap with special tokens
+            stoi[token] = len(stoi)
+
+    vocab = Vocab(stoi)
+    vocab.set_default_index(vocab.stoi["<unk>"])
 
     # Collate function
     def collate_batch(batch):
         texts, labels = zip(*batch)
-
-        # Tokenize and numericalize
-        tokenized = [tokenizer(text) for text in texts]
-        numericalized = [torch.tensor(vocab(tokens)) for tokens in tokenized]
-
-        # Pad sequences
-        padded = pad_sequence(numericalized, batch_first=True,
-                              padding_value=vocab["<pad>"])
-
-        # Truncate if necessary
+        # Tokenize each text and convert to indices
+        tokenized = [basic_tokenizer(text) for text in texts]
+        numericalized = [torch.tensor(vocab(tokens), dtype=torch.float32) for tokens in tokenized]
+        # Pad sequences to max_len
+        padded = pad_sequence(numericalized, batch_first=True, padding_value=vocab["<pad>"])
         if padded.size(1) > max_len:
             padded = padded[:, :max_len]
         elif padded.size(1) < max_len:
-            padding = torch.full((padded.size(0), max_len - padded.size(1)),
-                                 vocab["<pad>"], dtype=padded.dtype)
-            padded = torch.cat([padded, padding], dim=1)
-
-        labels = torch.tensor(labels, dtype=torch.float32)
-        return padded, labels
-
+            # pad to the right if shorter than max_len
+            pad_length = max_len - padded.size(1)
+            padding_tensor = torch.full((padded.size(0), pad_length), vocab["<pad>"], dtype=padded.dtype)
+            padded = torch.cat([padded, padding_tensor], dim=1)
+        # Convert labels to float tensor
+        labels_tensor = torch.tensor(labels, dtype=torch.float32)
+        return padded, labels_tensor
     # Create data loaders
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
                               collate_fn=collate_batch, num_workers=4, pin_memory=True)
@@ -459,7 +508,7 @@ def main():
     batch_size = 16
     max_len = 2048
     vocab_size = 130000
-    embedding_dim = 300
+    embedding_dim = 100
     epochs = 7
     learning_rate = 0.004
 
