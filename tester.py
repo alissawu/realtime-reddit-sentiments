@@ -3,7 +3,7 @@
 import re
 import gensim.downloader as api
 print("Downloading 100D GloVe vectors...")
-glove_vectors = api.load("glove-wiki-gigaword-100")
+#glove_vectors = api.load("glove-wiki-gigaword-100")
 
 
 def basic_tokenizer(text: str) -> list[str]:
@@ -289,7 +289,7 @@ class Vocab:
         # Convert list of tokens to list of indices
         return [self.__getitem__(tok) for tok in tokens]
 
-
+"""
 def load_glove_embeddings(vocab, embedding_dim=100, cache_dir=None):
     """Load GloVe embeddings with proper caching"""
     if cache_dir is None:
@@ -316,7 +316,61 @@ def load_glove_embeddings(vocab, embedding_dim=100, cache_dir=None):
             pretrained_embeddings[idx] = torch.randn(embedding_dim) * 0.1
 
     return pretrained_embeddings
+"""
 
+
+def load_glove_embeddings(vocab: Vocab,
+                          embedding_dim: int = 100,
+                          cache_dir: str | Path | None = None,
+                          lower_fallback: bool = True,
+                          oov_std: float = 0.1) -> torch.Tensor:
+    """
+    Returns [len(vocab), embedding_dim] Float32 tensor init from gensim GloVe.
+    Unknowns are ~N(0, oov_std^2); <pad> is all zeros
+
+    vocab: Vocab instance (must expose .stoi and get_stoi())
+    embedding_dim: {50, 100, 200, 300} for wiki-gigaword GloVe
+    cache_dir: optional dir for gensim downloader cache
+    lower_fallback: if token not found, try token.lower()
+    oov_std: normal std for random init of OOV rows
+    """
+    #give gensim loc to cache @ BEFORE LOADING
+    if cache_dir is not None:
+        os.environ.setdefault("GENSIM_DATA_DIR", str(cache_dir))
+
+    #map dim -> gensim model name
+    name_map = {
+        50: "glove-wiki-gigaword-50",
+        100: "glove-wiki-gigaword-100",
+        200: "glove-wiki-gigaword-200",
+        300: "glove-wiki-gigaword-300",
+    }
+    if embedding_dim not in name_map:
+        raise ValueError(f"embedding_dim must be one of {sorted(name_map)}")
+
+    #downloads then uses local cache
+    kv = api.load(name_map[embedding_dim])  #gensim KeyedVectors
+
+    vocab_size = len(vocab)
+    emb = torch.empty(vocab_size, embedding_dim, dtype=torch.float32)
+    torch.nn.init.normal_(emb, mean=0.0, std=oov_std)  #OOV default
+
+    #make <pad> zero vector if present
+    pad_idx = vocab.stoi.get("<pad>")
+    if pad_idx is not None:
+        emb[pad_idx].zero_()
+
+    #fast membership via key_to_index; pull vectors with get_vector()
+    key_to_index = kv.key_to_index
+    for token, idx in vocab.get_stoi().items():
+        if token == "<pad>":
+            continue
+        if token in key_to_index:
+            emb[idx] = torch.from_numpy(kv.get_vector(token))
+        elif lower_fallback and token.lower() in key_to_index:
+            emb[idx] = torch.from_numpy(kv.get_vector(token.lower()))
+        # else: keep rand init
+    return emb
 
 def create_data_loaders(batch_size=16, max_len=2048, vocab_size=130000):
     """Create data loaders with proper preprocessing"""
