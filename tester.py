@@ -178,7 +178,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             # Compute mean
             #self.pca_mean = flattened.mean(dim=0)
             mu = flattened.mean(dim=0)
-            self.pca_mean.copy_(mu)#keep registered buffer f32
+            #self.pca_mean.copy_(mu)#keep registered buffer f32
 
             centered = flattened - mu
             denom = max(centered.shape[0] - 1, 1) #numerically safe denom
