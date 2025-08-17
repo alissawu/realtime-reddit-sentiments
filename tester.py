@@ -32,6 +32,8 @@ from contextlib import  nullcontext
 #from torchtext.vocab import #build_vocab_from_iterator, GloVe
 
 
+torch.backends.cudnn.benchmark = True
+
 
 from typing import Callable, Sequence, Tuple
 from datasets import load_dataset
@@ -119,7 +121,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         super().__init__()
         self.max_len = max_len
         self.batch_size = batch_size
-        self.num_components = 300
+        self.num_components = embedding_dim
         self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Initialize embedding layer with float32
@@ -589,12 +591,37 @@ class CUDAPrefetcher:
                 target.to(self.device, non_blocking=True),
             )
 
-def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cuda'):
+
+def get_optimizer(model: nn.Module, lr: float, weight_decay: float):
+    """Choose most efficient opt avail"""
+    try:
+        from apex.optimizers import FusedAdam
+        print("Using NVIDIA Apex FusedAdam optimizer.")
+        return FusedAdam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    except ImportError:
+        try:
+            opt = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, fused=True)
+            print("Apex not found; using PyTorch AdamW with fused=True.")
+            return opt
+        except TypeError:
+            # Fused not supported in this build, use standard AdamW
+            print("WARNING: AdamW(fused=True) not supported, falling back to standard AdamW.")
+            return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device="cuda"):
     """Training function with mixed precision support"""
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    optimizer = get_optimizer(model, lr=lr, weight_decay=0.01)
 
+    total_steps = epochs * len(train_loader)
+    warmup_steps = int(0.05 * total_steps)
+
+    warmup = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=warmup_steps)
+    cosine = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps - warmup_steps, eta_min=1e-6)
+    warmup_steps = max(1, warmup_steps)
+    scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_steps]
+                                               )
+    #step scheduler each batch
     # Mixed precision training
     scaler = GradScaler()
 
@@ -608,7 +635,7 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
         amp_enabled = (device.type == "cuda")
 
         prefetch = CUDAPrefetcher(train_loader, device)
-        progress_bar = tqdm(prefetch, desc=f'Epoch {epoch + 1}/{epochs}')
+        progress_bar = tqdm(prefetch, desc=f"Epoch {epoch + 1}/{epochs}")
 
         #progress_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}')
         for inputs, labels in progress_bar:
@@ -626,6 +653,7 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            scheduler.step()
 
             #statistics
             train_loss += loss.item()
@@ -645,7 +673,7 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
         val_total = 0
 
         with torch.no_grad():
-            for inputs, labels in tqdm(val_loader, desc='Validation'):
+            for inputs, labels in tqdm(CUDAPrefetcher(val_loader, device), desc="Validation"):
                 inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
                 with autocast(device_type=device.type, enabled=amp_enabled):
@@ -663,21 +691,20 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
         avg_train_loss = train_loss / len(train_loader)
         avg_val_loss = val_loss / len(val_loader)
 
-        print(f'\nEpoch {epoch + 1}:')
-        print(f'  Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}')
-        print(f'  Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f}')
+        print(f"\nEpoch {epoch + 1}:")
+        print(f"  Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.4f}")
+        print(f"  Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
         # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_acc': val_acc,
-            }, 'best_model.pth')
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "val_acc": val_acc,
+            }, "best_model.pth")
 
-        scheduler.step()
 
     return model
 
@@ -712,9 +739,9 @@ def main():
     # Load pretrained embeddings
     print("Loading pretrained embeddings...")
     current_file_path = Path(__file__)
-    pretrained_vectors = load_glove_embeddings(vocab, embedding_dim,
-                                               f"{current_file_path}\glove)vecs"
-                                               ,True, 0.25)
+    cache_dir = (Path(__file__).parent / "glove_vecs").as_posix()
+    pretrained_vectors = load_glove_embeddings(vocab, embedding_dim, cache_dir, True, 0.25)
+
     """
     def load_glove_embeddings(vocab: Vocab,
                           embedding_dim: int = 100,
