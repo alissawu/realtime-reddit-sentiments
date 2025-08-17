@@ -526,15 +526,68 @@ def create_data_loaders(batch_size=16, max_len=2048, vocab_size=130000):
 
 
     collate = BatchCollator(vocab=vocab, max_len=max_len, tokenizer=basic_tokenizer)
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True,
-                              collate_fn=collate, num_workers=4, pin_memory=True)
-    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False,
-                            collate_fn=collate, num_workers=4, pin_memory=True)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False,
-                             collate_fn=collate, num_workers=4, pin_memory=True)
+    NUM_W = _suggest_num_workers()
+
+    train_loader = DataLoader(
+        train_data,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=collate,
+        num_workers=NUM_W,
+        pin_memory=True,  #enables async H2D w/ non_blocking
+        persistent_workers=True,  #keep workers alive across epochs
+        prefetch_factor=4  #each worker preloads 4 batches worth
+    )
+
+    val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, collate_fn=collate,
+        num_workers=max(2, NUM_W // 2), pin_memory=True, persistent_workers=True, prefetch_factor=2)
+
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, collate_fn=collate,
+        num_workers=max(2, NUM_W // 2), pin_memory=True, persistent_workers=True, prefetch_factor=2)
 
     return train_loader, val_loader, test_loader, vocab, tokenizer
 
+def _suggest_num_workers() -> int:
+    import os
+    #leave 1-2 CPUs for main process; cap at 8 to avoid oversubscription
+    return max(2, min((os.cpu_count() or 4) - 2, 8))
+
+
+class CUDAPrefetcher:
+    """
+    Overlaps H2D copies with compute via dedicated CUDA stream
+    Yields (inputs, labels) already on device with non_blocking copies.
+    """
+    def __init__(self, loader, device):
+        self.loader = loader
+        self.device = device
+        self.stream = torch.cuda.Stream() if device.type == "cuda" else None
+        self.next_batch = None
+
+    def __iter__(self):
+        it = iter(self.loader)
+        self._prefetch(it)
+        while self.next_batch is not None:
+            if self.stream is not None:
+                torch.cuda.current_stream().wait_stream(self.stream)
+            batch = self.next_batch
+            self._prefetch(it)
+            yield batch
+
+    def _prefetch(self, it):
+        try:
+            data, target = next(it)
+        except StopIteration:
+            self.next_batch = None
+            return
+        if self.stream is None:  #cpu‑only path
+            self.next_batch = (data, target)
+            return
+        with torch.cuda.stream(self.stream):
+            self.next_batch = (
+                data.to(self.device, non_blocking=True),
+                target.to(self.device, non_blocking=True),
+            )
 
 def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cuda'):
     """Training function with mixed precision support"""
@@ -553,23 +606,28 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
         train_correct = 0
         train_total = 0
         amp_enabled = (device.type == "cuda")
-        progress_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}')
+
+        prefetch = CUDAPrefetcher(train_loader, device)
+        progress_bar = tqdm(prefetch, desc=f'Epoch {epoch + 1}/{epochs}')
+
+        #progress_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}')
         for inputs, labels in progress_bar:
-            inputs, labels = inputs.to(device), labels.to(device)
+            if device.type != "cuda":  # CPU fall-back
+                inputs, labels = inputs.to(device), labels.to(device)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
-            # Mixed precision forward pass
-            with autocast(device_type=device.type,enabled=amp_enabled):
+            #mixed precision forward pass
+            with autocast(device_type=device.type, enabled=amp_enabled):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
 
-            # Backward pass
+            #backward pass
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
 
-            # Statistics
+            #statistics
             train_loss += loss.item()
             predictions = (torch.sigmoid(outputs) > 0.5).float()
             train_correct += (predictions == labels).sum().item()
@@ -588,9 +646,9 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
 
         with torch.no_grad():
             for inputs, labels in tqdm(val_loader, desc='Validation'):
-                inputs, labels = inputs.to(device), labels.to(device)
+                inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
-                with autocast(device_type='cuda'):
+                with autocast(device_type=device.type, enabled=amp_enabled):
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
 
@@ -691,9 +749,9 @@ def main():
 
     with torch.no_grad():
         for inputs, labels in tqdm(test_loader, desc='Testing'):
-            inputs, labels = inputs.to(device), labels.to(device)
+            inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
-            with autocast(device_type='cuda'):
+            with autocast(device_type=device.type, enabled=(device.type == "cuda")):
                 outputs = model(inputs)
 
             predictions = (torch.sigmoid(outputs) > 0.5).float()
