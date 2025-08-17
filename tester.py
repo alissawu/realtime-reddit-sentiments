@@ -26,7 +26,7 @@ import torch.optim as optim
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, random_split, ConcatDataset
 from torch.amp import autocast, GradScaler
-
+from contextlib import  nullcontext
 # Updated imports for newer versions
 #from torchtext.data.utils import get_tokenizer
 #from torchtext.vocab import #build_vocab_from_iterator, GloVe
@@ -147,12 +147,12 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                                bidirectional=False, dropout=0.25).to(self.device)
 
         # Learnable weights for fusion
-        self.weights = nn.Parameter(torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float32))
+        self.weights = nn.Parameter(torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float32, device=self.device))
 
         # PCA components buffer
         D = embedding_dim * 2
-        self.register_buffer('pca_mean', torch.zeros(D, dtype=torch.float32))
-        self.register_buffer('pca_components', torch.zeros(D, self.num_components, dtype=torch.float32))
+        self.register_buffer('pca_mean', torch.zeros(D, dtype=torch.float32, device=self.device))
+        self.register_buffer('pca_components', torch.zeros(D, self.num_components, dtype=torch.float32, device=self.device))
         self.pca_fitted = False
 
         # Final layers
@@ -161,35 +161,54 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.fc2 = nn.Linear(256, 16).to(self.device)
         self.fc3 = nn.Linear(16, 1).to(self.device)
 
+    def _no_autocast_ctx(self):
+        try:
+            return torch.cuda.amp.autocast(enabled=False) if self.device.type == "cuda" else nullcontext()
+        except Exception:
+            return nullcontext()
     def fit_pca(self, features):
-        """Fit PCA on a batch of features"""
-        batch, seq_len, D = features.shape
-        flattened = features.reshape(-1, D)
+        """Fit PCA on batch of features and writes to registered buffers
+        W/O creating graph history"""
 
-        # Compute mean
-        self.pca_mean = flattened.mean(dim=0)
-        centered = flattened - self.pca_mean
+        with torch.no_grad(), self._no_autocast_ctx():
 
-        # Compute covariance
-        cov_matrix = torch.matmul(centered.T, centered) / (flattened.shape[0] - 1)
+            batch, seq_len, D = features.shape
+            flattened = features.reshape(-1, D).to(self.device, dtype=torch.float32)
 
-        # Eigendecomposition
-        e_vals, e_vecs = torch.linalg.eigh(cov_matrix)
-        sorted_indices = torch.argsort(e_vals, descending=True)
-        self.pca_components = e_vecs[:, sorted_indices[:self.num_components]]
-        self.pca_fitted = True
+            # Compute mean
+            #self.pca_mean = flattened.mean(dim=0)
+            mu = flattened.mean(dim=0)
+            self.pca_mean.copy_(mu)#keep registered buffer f32
+
+            centered = flattened - mu
+            denom = max(centered.shape[0] - 1, 1) #numerically safe denom
+
+            # Compute covariance
+            cov_matrix =  (torch.matmul(centered.T , centered) / denom).to(self.device, dtype=torch.float32)#torch.matmul(centered.T, centered) / (flattened.shape[0] - 1)
+
+            # Eigendecomposition
+            e_vals, e_vecs = torch.linalg.eigh(cov_matrix)
+            sorted_indices = torch.argsort(e_vals, descending=True)
+            comps = e_vecs[:, sorted_indices[:self.num_components]]
+
+            #keeps buffers registered THEN copies into them
+            self.pca_mean.copy_(mu)
+            self.pca_components.copy_(comps)
+            self.pca_fitted = True
+
 
     def apply_pca(self, features):
         """Apply PCA transformation"""
-        batch, seq_len, D = features.shape
-        flattened = features.reshape(-1, D)
+        with autocast(device_type=self.device.type, enabled=False):
+            batch, seq_len, D = features.shape
+            flattened = features.reshape(-1, D).to(self.device, dtype=torch.float32)
 
-        if not self.pca_fitted:
-            self.fit_pca(features)
+            if not self.pca_fitted:
+                self.fit_pca(features)
 
-        centered = flattened - self.pca_mean
-        projected = torch.matmul(centered, self.pca_components)
-        return projected.reshape(batch, seq_len, self.num_components)
+            centered = flattened - self.pca_mean
+            projected = torch.matmul(centered ,self.pca_components)
+            return projected.reshape(batch, seq_len, self.num_components)
 
     def interleave_complex(self, complex_tensor):
         """Interleave real and imaginary parts"""
@@ -222,7 +241,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             indices = [4 * i + 1, 4 * i + 3, 4 * i + 4, 4 * i + 6]
             valid_indices = [idx for idx in indices if idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
 
@@ -244,14 +263,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
 
         # Handle first filter
         first_indices = [1, 2, 4, 6]
-        output_tensor[:, :, first_indices] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+        output_tensor[:, :, first_indices] = (1j * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
 
         # Regular filters
         for i in range(1, min(num_filters - 1, 682)):
             indices = [6 * i - 3, 6 * i - 1, 6 * i + 1, 6 * i + 2, 6 * i + 4, 6 * i + 6]
             valid_indices = [idx for idx in indices if 0 <= idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
 
@@ -260,14 +279,14 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
 
         # First filter
-        output_tensor[:, :, [1, 3, 5]] = 1j * input_tensor[:, :, 0].unsqueeze(-1)
+        output_tensor[:, :, [1, 3, 5]] = (1j * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
 
         # Regular filters
         for i in range(1, min(num_filters, 682)):
             indices = [6 * (i - 1) + 1, 6 * (i - 1) + 3, 6 * (i - 1) + 5, 6 * (i - 1) + 6, 6 * (i - 1) + 8]
             valid_indices = [idx for idx in indices if 0 <= idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = 1j * input_tensor[:, :, i].unsqueeze(-1)
+                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
 
@@ -533,7 +552,7 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
         train_loss = 0
         train_correct = 0
         train_total = 0
-
+        amp_enabled = (device.type == "cuda")
         progress_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}')
         for inputs, labels in progress_bar:
             inputs, labels = inputs.to(device), labels.to(device)
@@ -541,7 +560,7 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device='cud
             optimizer.zero_grad()
 
             # Mixed precision forward pass
-            with autocast(device_type='cuda'):
+            with autocast(device_type=device.type,enabled=amp_enabled):
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
 
@@ -619,7 +638,7 @@ def main():
     learning_rate = 0.004
 
     # Device setup
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Create data loaders
