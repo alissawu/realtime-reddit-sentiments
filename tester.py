@@ -6,6 +6,7 @@ print("Downloading 300D GloVe vectors...")
 #glove_vectors = api.load("glove-wiki-gigaword-100")
 
 
+
 def basic_tokenizer(text: str) -> list[str]:
     # Lowercase the text
     text = text.lower()
@@ -20,6 +21,10 @@ def basic_tokenizer(text: str) -> list[str]:
 
 import os
 import torch
+import torch._dynamo as dynamo
+
+torch._dynamo.config.suppress_errors = True
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -176,10 +181,16 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.fc2 = nn.Linear(256, 16).to(self.device)
         self.fc3 = nn.Linear(16, 1).to(self.device)
 
+    def _j_const(self):
+        #single-element complex64 Tensor equal to 0 + 1j
+        return torch.complex(
+            torch.tensor(0., device=self.device, dtype=torch.float32),
+            torch.tensor(1., device=self.device, dtype=torch.float32)
+        ).to(torch.complex64)
     def _no_autocast_ctx(self):
         try:
             return torch.cuda.amp.autocast(enabled=False) if self.device.type == "cuda" else nullcontext()
-        except Exception:
+        except Exception:#memo
             return nullcontext()
     def fit_pca(self, features):
         """Fit PCA on batch of features and writes to registered buffers
@@ -249,6 +260,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         interleaved[:, 1::2, :] = imag_part
         return interleaved"""
 
+    @dynamo.disable
     def kern2ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
@@ -258,19 +270,20 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             output_tensor[:, :, 2 * i + 1:2 * i + 3] = (input_tensor[:, :, i:i + 1].to(torch.complex64))
 
         return output_tensor
-
+    @dynamo.disable
     def kern4ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
+        J = self._j_const()
 
         for i in range(min(num_filters, 1023)):
             indices = [4 * i + 1, 4 * i + 3, 4 * i + 4, 4 * i + 6]
             valid_indices = [idx for idx in indices if idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
+                output_tensor[:, :, valid_indices] = (J * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
-
+    @dynamo.disable
     def kern3ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
@@ -282,40 +295,41 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                 #output_tensor[:, :, valid_indices] = input_tensor[:, :, i].unsqueeze(-1)
                 output_tensor[:, :, valid_indices] = (input_tensor[:, :, i].unsqueeze(-1).to(torch.complex64))
         return output_tensor
-
+    @dynamo.disable
     def kern6ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
+        J = self._j_const()
 
         # Handle first filter
         first_indices = [1, 2, 4, 6]
-        output_tensor[:, :, first_indices] = (1j * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
+        output_tensor[:, :, first_indices] = (J * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
 
         # Regular filters
         for i in range(1, min(num_filters - 1, 682)):
             indices = [6 * i - 3, 6 * i - 1, 6 * i + 1, 6 * i + 2, 6 * i + 4, 6 * i + 6]
             valid_indices = [idx for idx in indices if 0 <= idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
+                output_tensor[:, :, valid_indices] = (J * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
-
+    @dynamo.disable
     def kern5ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
         output_tensor = torch.zeros(N, embedding_dim, 4096, dtype=torch.complex64, device=self.device)
+        J = self._j_const()
 
         # First filter
-        output_tensor[:, :, [1, 3, 5]] = (1j * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
+        output_tensor[:, :, [1, 3, 5]] = (J * input_tensor[:, :, 0].unsqueeze(-1)).to(output_tensor.dtype)
 
         # Regular filters
         for i in range(1, min(num_filters, 682)):
             indices = [6 * (i - 1) + 1, 6 * (i - 1) + 3, 6 * (i - 1) + 5, 6 * (i - 1) + 6, 6 * (i - 1) + 8]
             valid_indices = [idx for idx in indices if 0 <= idx < 4096]
             if valid_indices:
-                output_tensor[:, :, valid_indices] = (1j * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
+                output_tensor[:, :, valid_indices] = (J * input_tensor[:, :, i].unsqueeze(-1)).to(output_tensor.dtype)
 
         return output_tensor
-
     def forward(self, x):
         # Ensure correct batch size
         current_batch_size = x.size(0)
