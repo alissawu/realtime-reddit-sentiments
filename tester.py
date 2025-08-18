@@ -136,7 +136,20 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.kern4s2 = nn.Conv1d(embedding_dim, embedding_dim, kernel_size=4, stride=2).to(self.device)
         self.kern3s3p1 = nn.Conv1d(embedding_dim, embedding_dim, kernel_size=3, stride=3, padding=2).to(self.device)
         self.kern6s3p1 = nn.Conv1d(embedding_dim, embedding_dim, kernel_size=6, stride=3, padding=2).to(self.device)
+
         self.kern5s3 = nn.Conv1d(embedding_dim, embedding_dim, kernel_size=5, stride=3, padding=0).to(self.device)
+
+        assert embedding_dim % 2 == 0, "embedding_dim must be even so 2K == embedding_dim"
+        self.K = embedding_dim // 2
+
+        self.upp_Ar = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
+        self.upp_Ai = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
+
+        self.mid_Ar = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
+        self.mid_Ai = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
+
+        self.low_Ar = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
+        self.low_Ai = nn.Linear(embedding_dim, self.K, bias=True).to(self.device)
 
         # LSTM layers
         lstm_hidden = embedding_dim
@@ -152,10 +165,10 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         self.weights = nn.Parameter(torch.tensor([0.25, 0.25, 0.25, 0.25], dtype=torch.float32, device=self.device))
 
         # PCA components buffer
-        D = embedding_dim * 2
+        """D = embedding_dim * 2
         self.register_buffer('pca_mean', torch.zeros(D, dtype=torch.float32, device=self.device))
         self.register_buffer('pca_components', torch.zeros(D, self.num_components, dtype=torch.float32, device=self.device))
-        self.pca_fitted = False
+        self.pca_fitted = False"""
 
         # Final layers
         self.fc1 = nn.Linear(embedding_dim, 256).to(self.device)
@@ -212,8 +225,19 @@ class CNNToLSTMCustomInterleaving(nn.Module):
             projected = torch.matmul(centered ,self.pca_components)
             return projected.reshape(batch, seq_len, self.num_components)
 
-    def interleave_complex(self, complex_tensor):
-        """Interleave real and imaginary parts"""
+    def _complex_project(self, xr, xi, Ar, Ai):
+        yr = Ar(xr) - Ai(xi)
+        yi = Ai(xr) + Ar(xi)
+        return yr, yi
+
+    def _apply_complex_block(self, x_complex, Ar, Ai):
+        # x_complex: [B, D, T] complex -> [B, T, 2K] float32
+        xr = x_complex.real.permute(0, 2, 1).contiguous().to(torch.float32)  # [B, T, D]
+        xi = x_complex.imag.permute(0, 2, 1).contiguous().to(torch.float32)  # [B, T, D]
+        yr, yi = self._complex_project(xr, xi, Ar, Ai)  # [B, T, K] each
+        return torch.cat([yr, yi], dim=-1)
+
+    """def interleave_complex(self, complex_tensor):
         real_part = complex_tensor.real
         imag_part = complex_tensor.imag
         batch_size, channels, seq_len = real_part.shape
@@ -223,7 +247,7 @@ class CNNToLSTMCustomInterleaving(nn.Module):
                                   device=self.device, dtype=torch.float32)
         interleaved[:, 0::2, :] = real_part
         interleaved[:, 1::2, :] = imag_part
-        return interleaved
+        return interleaved"""
 
     def kern2ImagTransformer(self, input_tensor):
         N, embedding_dim, num_filters = input_tensor.shape
@@ -309,16 +333,22 @@ class CNNToLSTMCustomInterleaving(nn.Module):
         lowk5 = self.kern5ImagTransformer(self.kern5s3(x))
 
         # Combine and process
-        upper_combined = topk2 + topk4
-        upper_interleaved = self.interleave_complex(upper_combined).transpose(1, 2)
-        upper_input = self.apply_pca(upper_interleaved)
+        """
+            upper_combined = topk2 + topk4
+            upper_interleaved = self.interleave_complex(upper_combined).transpose(1, 2)
+            upper_input = self.apply_pca(upper_interleaved)
+    
+            mid_combined = midk3 + midk6
+            mid_interleaved = self.interleave_complex(mid_combined).transpose(1, 2)
+            mid_input = self.apply_pca(mid_interleaved)
+    
+            low_interleaved = self.interleave_complex(lowk5).transpose(1, 2)
+            low_input = self.apply_pca(low_interleaved)
+        """
 
-        mid_combined = midk3 + midk6
-        mid_interleaved = self.interleave_complex(mid_combined).transpose(1, 2)
-        mid_input = self.apply_pca(mid_interleaved)
-
-        low_interleaved = self.interleave_complex(lowk5).transpose(1, 2)
-        low_input = self.apply_pca(low_interleaved)
+        upper_input = self._apply_complex_block(topk2 + topk4, self.upp_Ar, self.upp_Ai)
+        mid_input = self._apply_complex_block(midk3 + midk6, self.mid_Ar, self.mid_Ai)
+        low_input = self._apply_complex_block(topk2 + lowk5, self.low_Ar, self.low_Ai)
 
         # LSTM processing
         upp_out, _ = self.uppLSTM(upper_input)
@@ -592,35 +622,56 @@ class CUDAPrefetcher:
             )
 
 
+def get_param_groups_for_decay(model: nn.Module, wd: float = 0.01):
+    decay, no_decay = [], []
+    for n, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        #exclude biases (and norm layers) from decay
+        if n.endswith(".bias") or "norm" in n.lower():  #adjust if add LayerNorm/BatchNorm later
+            no_decay.append(p)
+        else:
+            decay.append(p)
+    return [
+        {"params": decay, "weight_decay": wd},
+        {"params": no_decay, "weight_decay": 0.0},
+    ]
+
 def get_optimizer(model: nn.Module, lr: float, weight_decay: float):
-    """Choose most efficient opt avail"""
+    """Prefer native fused AdamW; fallback to std AdamW; optionally try Apex if present."""
+    param_groups = get_param_groups_for_decay(model, wd=weight_decay)
+    #try PyTorch fused AdamW (no extra deps)
+    try:
+        opt = torch.optim.AdamW(param_groups, lr=lr, fused=True)
+        print("Using PyTorch AdamW (fused=True).")
+        return opt
+    except TypeError:
+        pass
+    #optional Apex fallback
     try:
         from apex.optimizers import FusedAdam
-        print("Using NVIDIA Apex FusedAdam optimizer.")
-        return FusedAdam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        print("Using Apex FusedAdam.")
+        return FusedAdam(param_groups, lr=lr)   #apex is drop-in and supports param groups
     except ImportError:
-        try:
-            opt = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay, fused=True)
-            print("Apex not found; using PyTorch AdamW with fused=True.")
-            return opt
-        except TypeError:
-            # Fused not supported in this build, use standard AdamW
-            print("WARNING: AdamW(fused=True) not supported, falling back to standard AdamW.")
-            return optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-
+        pass
+    #final fallback: standard AdamW
+    print("Using standard AdamW (no fused path).")
+    return torch.optim.AdamW(param_groups, lr=lr)
 def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device="cuda"):
     """Training function with mixed precision support"""
     criterion = nn.BCEWithLogitsLoss()
     optimizer = get_optimizer(model, lr=lr, weight_decay=0.01)
 
     total_steps = epochs * len(train_loader)
-    warmup_steps = int(0.05 * total_steps)
+    warmup_steps = max(1, int(0.05 * total_steps))  #clamp
 
-    warmup = optim.lr_scheduler.LinearLR(optimizer, start_factor=0.01, total_iters=warmup_steps)
-    cosine = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps - warmup_steps, eta_min=1e-6)
-    warmup_steps = max(1, warmup_steps)
-    scheduler = optim.lr_scheduler.SequentialLR(optimizer, [warmup, cosine], milestones=[warmup_steps]
-                                               )
+    warmup = optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, total_iters=warmup_steps)
+    cosine = optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=total_steps - warmup_steps, eta_min=1e-6)
+    scheduler = optim.lr_scheduler.SequentialLR(
+        optimizer, [warmup, cosine], milestones=[warmup_steps])
+
     #step scheduler each batch
     # Mixed precision training
     scaler = GradScaler()
@@ -651,6 +702,11 @@ def train_model(model, train_loader, val_loader, epochs=7, lr=0.004, device="cud
 
             #backward pass
             scaler.scale(loss).backward()
+
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+
             scaler.step(optimizer)
             scaler.update()
             scheduler.step()
@@ -758,6 +814,12 @@ def main():
         max_len=max_len,
         device=device
     )
+    try:
+        model = torch.compile(model, mode="reduce-overhead")
+        print("torch.compile enabled (reduce-overhead).")
+    except Exception as e:
+        print("torch.compile skipped:", e)
+
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
