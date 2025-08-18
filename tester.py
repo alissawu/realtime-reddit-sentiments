@@ -1,5 +1,5 @@
-#pytorch 2.6
-#python 3.11
+#pytorch 2.4.1
+#python 3.10
 import re
 import gensim.downloader as api
 print("Downloading 300D GloVe vectors...")
