@@ -116,10 +116,6 @@ def index():
 def modelnotes_page():
     return render_template("modelnotes.html")
 
-@app.route("/<subreddit>")
-def subreddit_page(subreddit):
-    return render_template("subreddit.html", subreddit=subreddit)
-
 @app.route("/fetch_sentiment/<subreddit>")
 def fetch_sentiment(subreddit):
     try:
@@ -137,6 +133,11 @@ def fetch_headlines(subreddit):
     except Exception as e:
         print("fetch_headlines ERROR:", e, "\n", traceback.format_exc())
         return jsonify(error=str(e)), 500
+
+# catch all page has to go last
+@app.route("/<subreddit>")
+def subreddit_page(subreddit):
+    return render_template("subreddit.html", subreddit=subreddit)
 
 # Vercel handler
 app = app
