@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-import os, time, traceback
+import os, traceback
 from functools import lru_cache
 
-# Cache models in /tmp so cold starts don't re-download each time
+# Cache Hugging Face downloads in /tmp for faster cold starts
 os.environ.setdefault("HF_HOME", "/tmp/hf")
 os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf")
 
@@ -11,7 +11,7 @@ import pandas as pd
 import praw
 from transformers import pipeline
 
-# ---------- Flask: point to templates/static outside /api ----------
+# ---------- Flask ----------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app = Flask(
     __name__,
@@ -36,21 +36,16 @@ except Exception as e:
     print("Reddit init failed:", e)
     reddit = None
 
-# ---------- Local HF pipeline (downloads from Hugging Face Hub) ----------
+# ---------- Hugging Face pipeline ----------
 HF_MODEL_ID = os.getenv("HF_MODEL_ID", "alissawu/realtime-reddit-distilbert")
-HF_TOKEN = os.getenv("HF_TOKEN", "")  # Read or All-scopes token if your model is private; harmless if public
 
 @lru_cache(maxsize=1)
 def get_pipeline():
-    """
-    Lazy-load once per cold start. First run may take ~30–60s to download weights.
-    Cached under /tmp/hf for the life of the serverless instance.
-    """
+    """Lazy-load pipeline once per cold start."""
     return pipeline(
         "text-classification",
         model=HF_MODEL_ID,
         tokenizer=HF_MODEL_ID,
-        use_auth_token=(HF_TOKEN or None),
         truncation=True,
     )
 
@@ -59,12 +54,10 @@ def predict_sentiments(texts):
         return []
     clf = get_pipeline()
     outputs = clf(texts, truncation=True)
-    # Normalize to polarity in [-1, 1]
     res = []
     for out in outputs:
         label = out["label"]
         score = float(out["score"])
-        # handle either LABEL_0/LABEL_1 or NEGATIVE/POSITIVE
         if label in ("LABEL_1", "POSITIVE"):
             p_pos = score
         else:
@@ -84,7 +77,7 @@ def get_data(subreddit: str, post_limit: int = 20):
     med = float(df["sentiment"].median()) if not df.empty else 0.0
     return avg, med, data
 
-# ---------- Health & routes ----------
+# ---------- Routes ----------
 @app.route("/health")
 def health():
     return jsonify({
@@ -93,7 +86,6 @@ def health():
             "CLIENT_SECRET": bool(CLIENT_SECRET),
             "USER_AGENT": bool(USER_AGENT),
             "HF_MODEL_ID": HF_MODEL_ID,
-            "HF_TOKEN_present": bool(HF_TOKEN),
         }
     })
 
@@ -123,7 +115,6 @@ def fetch_headlines(subreddit):
         print("fetch_headlines ERROR:", e, "\n", traceback.format_exc())
         return jsonify(error=str(e)), 500
 
-# keep catch-all last
 @app.route("/<subreddit>")
 def subreddit_page(subreddit):
     return render_template("subreddit.html", subreddit=subreddit)
