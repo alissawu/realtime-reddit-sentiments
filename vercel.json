@@ -1,11 +1,10 @@
 {
-  "functions": {
-    "api/*.py": {
-      "runtime": "python@3.11",
-      "maxDuration": 60,
-      "memory": 1024
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
     }
-  },
+  ],
   "routes": [
     { "src": "/static/(.*)", "dest": "/static/$1" },
     { "src": "/(.*)", "dest": "/api/app.py" }
