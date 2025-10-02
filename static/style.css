@@ -35,4 +35,43 @@ body {
     background-color: #FFFE9C
 }
 
+.nav-container {
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+}
+.search-container {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+.search-input {
+    font-family: Andale Mono, monospace;
+    background-color: #d9b29C;
+    border: 1px solid #946666;
+    padding: 5px 8px;
+    margin-right: 5px;
+    font-size: 14px;
+}
+.search-input:focus {
+    outline: none;
+    background-color: #FFFE9C;
+}
+.search-btn {
+    font-family: Andale Mono, monospace;
+    background-color: #946666;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    font-size: 14px;
+}
+.search-btn:hover {
+    background-color: #FFFE9C;
+    color: black;
+}
+.container {
+    padding: 20px;
+}
+
 /*https://images.app.goo.gl/9xZ8ukLnk25sac8x6*/

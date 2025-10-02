@@ -9,7 +9,7 @@ from torchtext.data import imdb
 
 # Load IMDB dataset
 vocabulary_size = 30000
- (X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
+(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=vocabulary_size)
 print('Loaded dataset with {} training samples, {} test samples'.format(len(X_train), len(X_test)))
 
 # Pad sequences to ensure uniform length

@@ -48,13 +48,34 @@ function fetchHeadlines(subreddit) {
     fetchData(url).then(updateHeadlinesDisplay);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const subreddit = new URL(window.location.href).pathname.split('/')[1]; // get the subreddit from the URL
-    fetchSentimentScores(subreddit);
-    fetchHeadlines(subreddit);
+// Search functionality
+function searchSubreddit() {
+    const input = document.getElementById('subredditSearch');
+    const subreddit = input.value.trim().replace(/^r\//, ''); // Remove r/ if user includes it
+    if (subreddit) {
+        window.location.href = `/${subreddit}`;
+    }
+}
 
-    setInterval(() => {
+// Allow Enter key to trigger search
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('subredditSearch');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                searchSubreddit();
+            }
+        });
+    }
+
+    const subreddit = new URL(window.location.href).pathname.split('/')[1]; // get the subreddit from the URL
+    if (subreddit && subreddit !== '' && subreddit !== 'modelnotes') {
         fetchSentimentScores(subreddit);
         fetchHeadlines(subreddit);
-    }, 10000); // 10 sec
+
+        setInterval(() => {
+            fetchSentimentScores(subreddit);
+            fetchHeadlines(subreddit);
+        }, 10000); // 10 sec
+    }
 });

@@ -8,28 +8,24 @@
 </head>
 <body>
     <div class="topnav">
-        <a href="/" class="{{ 'active' if active_link == 'index' else '' }}">About</a>
-        <a href="/modelnotes" class="{{ 'active' if active_link == 'modelnotes' else '' }}">Model Notes</a>
-        <a href="/politics" class="{{ 'active' if active_link == 'politics' else '' }}">r/politics</a>
-        <a href="/AmITheAsshole" class="{{ 'active' if active_link == 'AmITheAsshole' else '' }}">r/AITA</a>
+        <div class="nav-container">
+            <a href="/">About</a>
+            <a href="/modelnotes">Model Notes</a>
+            <a href="/politics">r/politics</a>
+            <a href="/AmITheAsshole">r/AITA</a>
+            <div class="search-container">
+                <input type="text" id="subredditSearch" class="search-input" placeholder="Enter subreddit name...">
+                <button onclick="searchSubreddit()" class="search-btn">Go</button>
+            </div>
+        </div>
     </div>
 
-    <h1>Sentiment Analysis for r/{{ subreddit | capitalize }}</h1>
-    <p id="average">Loading average sentiment...</p>
-    <p id="median">Loading median sentiment...</p>
-    <div id="headlinesContainer"></div>
+    <div class="container">
+        <h1>Sentiment Analysis for r/{{ subreddit | capitalize }}</h1>
+        <p id="average">Loading average sentiment...</p>
+        <p id="median">Loading median sentiment...</p>
+        <div id="headlinesContainer"></div>
+    </div>
 
-    <script>
-        const subreddit = "{{ subreddit }}";
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchSentimentScores(subreddit);
-            fetchHeadlines(subreddit);
-
-            setInterval(() => {
-                fetchSentimentScores(subreddit);
-                fetchHeadlines(subreddit);
-            }, 10000); // 10 sec
-        });
-    </script>
 </body>
 </html>
