@@ -1,6 +1,5 @@
 import os
 import time
-import json
 import traceback
 from functools import lru_cache
 
@@ -34,25 +33,29 @@ except Exception as e:
     print("Reddit init failed:", e)
     reddit = None
 
-# ---------- Hugging Face Inference API (public model OK: no token needed) ----------
+# ---------- Hugging Face Inference API (PUBLIC model: no token) ----------
 HF_MODEL_ID = os.getenv("HF_MODEL_ID", "alissawu/realtime-reddit-distilbert")
-HF_TOKEN = os.getenv("HF_TOKEN")  # optional if private; omit when public
 HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
-HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"} if HF_TOKEN else {}
 
 def _hf_call(payload, timeout=25):
-    """Call HF once; retry once on cold-start 503."""
-    r = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=timeout)
+    """
+    Call HF once without auth header (public model). Retry once on 503 cold start.
+    Raise with details on non-200.
+    """
+    r = requests.post(HF_API_URL, json=payload, timeout=timeout)
     if r.status_code == 503:  # model cold start
         time.sleep(1.0)
-        r = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=timeout)
-    r.raise_for_status()
+        r = requests.post(HF_API_URL, json=payload, timeout=timeout)
+    if r.status_code != 200:
+        # bubble up useful error text into Vercel logs
+        raise RuntimeError(f"HF API error {r.status_code}: {r.text}")
     return r.json()
 
+# ---- single / batch inference helpers ----
 @lru_cache(maxsize=2048)
 def _classify_one(text: str):
     data = _hf_call({"inputs": text})
-    # normalize response to list[dict]
+    # normalize to list[dict]
     if isinstance(data, list) and data and isinstance(data[0], dict):
         return data
     if isinstance(data, list) and data and isinstance(data[0], list):
@@ -70,9 +73,9 @@ def predict_sentiments(texts):
     if not texts:
         return []
     data = _hf_call({"inputs": texts})
+    # expected: list-of-list-of-dicts
     if not (isinstance(data, list) and data and isinstance(data[0], list)):
-        # if HF returns single-item format, wrap it
-        data = [data]
+        data = [data]  # handle single-item fallback
     res = []
     for item in data:
         out = item[0]
@@ -104,7 +107,7 @@ def health():
             "CLIENT_SECRET": bool(CLIENT_SECRET),
             "USER_AGENT": bool(USER_AGENT),
             "HF_MODEL_ID": HF_MODEL_ID,
-            "HF_TOKEN_present": bool(HF_TOKEN),
+            "HF_TOKEN_present": False,   # always false in this token-free build
         }
     })
 
@@ -116,6 +119,7 @@ def index():
 def modelnotes_page():
     return render_template("modelnotes.html")
 
+# --- API routes BEFORE catch-all ---
 @app.route("/fetch_sentiment/<subreddit>")
 def fetch_sentiment(subreddit):
     try:
@@ -134,7 +138,7 @@ def fetch_headlines(subreddit):
         print("fetch_headlines ERROR:", e, "\n", traceback.format_exc())
         return jsonify(error=str(e)), 500
 
-# catch all page has to go last
+# --- Catch-all page route LAST ---
 @app.route("/<subreddit>")
 def subreddit_page(subreddit):
     return render_template("subreddit.html", subreddit=subreddit)
@@ -143,5 +147,4 @@ def subreddit_page(subreddit):
 app = app
 
 if __name__ == "__main__":
-    # local dev
     app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
