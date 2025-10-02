@@ -1,11 +1,10 @@
 {
-  "builds": [
-    {
-      "src": "api/*.py",
-      "use": "@vercel/python"
-    }
-  ],
+  "builds": [{ "src": "api/*.py", "use": "@vercel/python" }],
+  "functions": {
+    "api/app.py": { "maxDuration": 60, "memory": 1024 }
+  },
   "routes": [
+    { "src": "/static/(.*)", "dest": "/static/$1" },
     { "src": "/(.*)", "dest": "/api/app.py" }
   ]
 }

@@ -1,5 +1,6 @@
-Flask
+flask
 praw
 pandas
 requests
-python-dotenv
+transformers>=4.40
+torch

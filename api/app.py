@@ -1,12 +1,15 @@
-import os
-import time
-import traceback
+#!/usr/bin/env python3
+import os, time, traceback
 from functools import lru_cache
 
-import requests
+# Cache models in /tmp so cold starts don't re-download each time
+os.environ.setdefault("HF_HOME", "/tmp/hf")
+os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf")
+
 from flask import Flask, jsonify, render_template
 import pandas as pd
 import praw
+from transformers import pipeline
 
 # ---------- Flask: point to templates/static outside /api ----------
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,54 +36,39 @@ except Exception as e:
     print("Reddit init failed:", e)
     reddit = None
 
-# ---------- Hugging Face Inference API (PUBLIC model: no token) ----------
+# ---------- Local HF pipeline (downloads from Hugging Face Hub) ----------
 HF_MODEL_ID = os.getenv("HF_MODEL_ID", "alissawu/realtime-reddit-distilbert")
-HF_API_URL = f"https://api-inference.huggingface.co/models/{HF_MODEL_ID}"
+HF_TOKEN = os.getenv("HF_TOKEN", "")  # Read or All-scopes token if your model is private; harmless if public
 
-def _hf_call(payload, timeout=25):
+@lru_cache(maxsize=1)
+def get_pipeline():
     """
-    Call HF once without auth header (public model). Retry once on 503 cold start.
-    Raise with details on non-200.
+    Lazy-load once per cold start. First run may take ~30–60s to download weights.
+    Cached under /tmp/hf for the life of the serverless instance.
     """
-    r = requests.post(HF_API_URL, json=payload, timeout=timeout)
-    if r.status_code == 503:  # model cold start
-        time.sleep(1.0)
-        r = requests.post(HF_API_URL, json=payload, timeout=timeout)
-    if r.status_code != 200:
-        # bubble up useful error text into Vercel logs
-        raise RuntimeError(f"HF API error {r.status_code}: {r.text}")
-    return r.json()
-
-# ---- single / batch inference helpers ----
-@lru_cache(maxsize=2048)
-def _classify_one(text: str):
-    data = _hf_call({"inputs": text})
-    # normalize to list[dict]
-    if isinstance(data, list) and data and isinstance(data[0], dict):
-        return data
-    if isinstance(data, list) and data and isinstance(data[0], list):
-        return data[0]
-    raise RuntimeError(f"Unexpected HF response: {data}")
-
-def predict_sentiment(text: str) -> float:
-    out = _classify_one(text)[0]
-    label = out["label"]; score = float(out["score"])
-    p_pos = score if label == "LABEL_1" else 1.0 - score
-    return 2.0 * p_pos - 1.0
+    return pipeline(
+        "text-classification",
+        model=HF_MODEL_ID,
+        tokenizer=HF_MODEL_ID,
+        use_auth_token=(HF_TOKEN or None),
+        truncation=True,
+    )
 
 def predict_sentiments(texts):
-    """Batch classify many texts in a single HF call."""
     if not texts:
         return []
-    data = _hf_call({"inputs": texts})
-    # expected: list-of-list-of-dicts
-    if not (isinstance(data, list) and data and isinstance(data[0], list)):
-        data = [data]  # handle single-item fallback
+    clf = get_pipeline()
+    outputs = clf(texts, truncation=True)
+    # Normalize to polarity in [-1, 1]
     res = []
-    for item in data:
-        out = item[0]
-        label = out["label"]; score = float(out["score"])
-        p_pos = score if label == "LABEL_1" else 1.0 - score
+    for out in outputs:
+        label = out["label"]
+        score = float(out["score"])
+        # handle either LABEL_0/LABEL_1 or NEGATIVE/POSITIVE
+        if label in ("LABEL_1", "POSITIVE"):
+            p_pos = score
+        else:
+            p_pos = 1.0 - score
         res.append(2.0 * p_pos - 1.0)
     return res
 
@@ -90,13 +78,11 @@ def get_data(subreddit: str, post_limit: int = 20):
     posts = list(reddit.subreddit(subreddit).new(limit=post_limit))
     titles = [p.title for p in posts]
     sentiments = predict_sentiments(titles)
-
     data = [{"title": t, "sentiment": s} for t, s in zip(titles, sentiments)]
     df = pd.DataFrame(data)
     avg = float(df["sentiment"].mean()) if not df.empty else 0.0
     med = float(df["sentiment"].median()) if not df.empty else 0.0
-    headlines = data  # already <= 20
-    return avg, med, headlines
+    return avg, med, data
 
 # ---------- Health & routes ----------
 @app.route("/health")
@@ -107,7 +93,7 @@ def health():
             "CLIENT_SECRET": bool(CLIENT_SECRET),
             "USER_AGENT": bool(USER_AGENT),
             "HF_MODEL_ID": HF_MODEL_ID,
-            "HF_TOKEN_present": False,   # always false in this token-free build
+            "HF_TOKEN_present": bool(HF_TOKEN),
         }
     })
 
@@ -119,7 +105,6 @@ def index():
 def modelnotes_page():
     return render_template("modelnotes.html")
 
-# --- API routes BEFORE catch-all ---
 @app.route("/fetch_sentiment/<subreddit>")
 def fetch_sentiment(subreddit):
     try:
@@ -138,7 +123,7 @@ def fetch_headlines(subreddit):
         print("fetch_headlines ERROR:", e, "\n", traceback.format_exc())
         return jsonify(error=str(e)), 500
 
-# --- Catch-all page route LAST ---
+# keep catch-all last
 @app.route("/<subreddit>")
 def subreddit_page(subreddit):
     return render_template("subreddit.html", subreddit=subreddit)
