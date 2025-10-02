@@ -1,15 +1,13 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "rtsent.py",
-      "use": "@vercel/python"
+  "functions": {
+    "api/app.py": {
+      "runtime": "python3.9",
+      "maxDuration": 60,
+      "memory": 1024
     }
-  ],
+  },
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "rtsent.py"
-    }
+    { "src": "/static/(.*)", "dest": "/static/$1" },
+    { "src": "/(.*)", "dest": "/api/app.py" }
   ]
 }
