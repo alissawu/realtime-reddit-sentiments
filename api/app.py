@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request
 import pandas as pd
 import praw
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="../templates", static_folder="../static")
 
 # ----- Reddit API -----
 CLIENT_ID = os.getenv("CLIENT_ID")
