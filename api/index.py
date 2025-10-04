@@ -154,7 +154,7 @@ def index():
 @app.route("/modelnotes")
 def modelnotes_page():
     return render_template("modelnotes.html")
-
+# script.js calls this to fetch data
 @app.route("/api/sub/<subreddit>")
 def api_sub(subreddit):
     try:
@@ -163,6 +163,10 @@ def api_sub(subreddit):
     except Exception as e:
         print("api_sub ERROR:", e, "\n", traceback.format_exc())
         return jsonify(error=str(e)), 500
+# this is used for the template html site
+@app.route("/<subreddit>")
+def subreddit_page(subreddit):
+    return render_template("subreddit.html", subreddit=subreddit)
 
 # tiny warm route to preheat the endpoint without blocking users
 @app.route("/warm")
