@@ -22,32 +22,35 @@
 
         <div class="container">
             <h1>Project Overview</h1>
-            <p>This web application provides real-time sentiment analysis of the 20 most recent posts from r/politics and r/AITA, and will update based on new posts. </p>
-            <p>Backend: Flask, Textblob for sentiment analysis; Front-end: HTML/CSS/JS (formerly TS, which is unecessarily difficult as flask is used with a very specific HTML/CSS/JS structure, and requires many additional dependencies and etc to replace with TS)</p>
+            <p>This web app provides real-time sentiment analysis of the latest posts from any subreddit (default: r/politics and r/AITA). It fetches the newest headlines via Reddit’s API, runs them through a fine-tuned DistilBERT sentiment model hosted on Hugging Face, and serves both cached and live results.</p>
+            <p>Backend: Flask, Redis (for caching), Hugging Face Inference Endpoint (DistilBERT). <br>
+               Frontend: HTML/CSS/JavaScript. Deployed on Vercel.</p>
             
             <h2>Structure</h2>
             <ul>
-                <li>Displays mean and median sentiment statistics and formatted data of the 20 posts.</li>
-                <li>Sentiment ranges from -1 (negative) to 1 (positive)</li>
+                <li>Fetches headlines + scores in real-time, but also caches results so users see instant data while the model warms up.</li>
+                <li>Sentiment scores range from -1 (negative) to +1 (positive).</li>
+                <li>Endpoints return JSON (avg, median, post-level sentiment), and pages render them dynamically.</li>
             </ul>
+
             <h2>Coolest Features</h2>
             <ul>
-                <li>New subreddit pages are literally added by just adding onto the HTML nav bar, due to the "subreddit.html" template page that takes the subreddit as an input from the link.</li>
-                <li>See more subreddits by adding the name after the slash ie:
-                    https://quiet-sierra-95106-5ca898adfa7b.herokuapp.com/pics <- r/pics
-                </li>
+                <li>Dynamic subreddit pages: just go to <code>/subreddit_name</code> (like <code>/pics</code>) and it works out-of-the-box.</li>
+                <li>Redis caching: stale results (up to 1h old) are served instantly while new scores are fetched in the background. This is to reduce my HuggingFace inference costs :( nothing is free in life... </li>
+                <li>Endpoint “warm” route: pings the Hugging Face model so users don&apos;t wait through cold starts.</li>
             </ul>
-            <h2>To do</h2>
+
+            <h2>To Do</h2>
             <ul>
-                <li>Optimizing / analyzing the sentiment analysis model. Looking at the model architecture specifics, epoch opt., confusion matrix, etc - obviously rn still pretty inaccurate but the structure is in place.</li>
-                <li>Automate optimization process (ie vocab size, other stuff, stop when validation loss increases)</li>
-                <li>Adding user-input for subreddits instead of manually adding on my end </li>
+                <li>Improve model accuracy with more training + fine-tuning.</li>
+                <li>Experiment with vocab size, learning rate, optimizer settings.</li>
+                <li>Add more visualizations: histograms of sentiment distribution, trendlines over time, etc.</li>
             </ul>
+
             <h2>Creator(s)</h2>
             <ul>
-                <li><a href="https://github.com/alissawu">Alissa Wu</a>, Duke University Computer Science and Mathematics</li>
-                <li><a href="https://github.com/EvanPFWang">Evan Wang</a>, New York University Mathematics and Computer Science</li>
-                <li>PS: This site costs me $7/month to host, support if you want: <a href="https://ko-fi.com/alissawu">kofi</a> :) </li>
+                <li><a href="https://github.com/alissawu">Alissa Wu</a>, NYU CS + Math</li>
+                <li><a href="https://github.com/EvanPFWang">Evan Wang</a>, NYU Math + CS</li>
             </ul>
         </div>
     </body>

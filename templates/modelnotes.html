@@ -22,54 +22,51 @@
 
         <div class="container">
             <h1>Model Notes</h1>
-            <h2>Model 1: Naive Bayes</h2>
-            <p>For fast deployment, we initially used TextBlob, which is a simple Naive Bayes sentiment model. Naive Bayes is a simple probablistic algorithm. It basically calculates the probability of a sentence being negative based on whether the words in that sentence typically appear in negative or positive sentences.</p>
-            <p>For example, if 80% of training data with the word "stupid" end up being negative, "stupid" will be classified as negative, and any test sentence with the word "stupid" will have that negative weight</p>
-            <p>The test sentence sentiment is based on which sentiment the words most lean toward</p>
-            <p> It's a naive algorithm because it assumes word meanings are independent, which isn't that true. For example, "pretty" is a posoitive word, "stupid" is a negative word, but "pretty stupid" is especially negative.</p>
-            <p> It's light and easy to deploy'</p>
-            
-            <h2>Model 2: Keras Neural Network Model</h2>
-            <p>This model used an Embedding layer and a simple Dense neural network to classify sentiment. It captures some word relationships via embeddings but doesn't model temporal dependencies</p>
-            <h3>Architecture</h3>
-                <p>Embedding layer: turns word indicies into dense word vectors, which captures semantic meanings, and doesn't treat words as independent</p>
-                <p>GlobalAveragePooling1D: Summarizes the word embeddings of a sentence into a single vector.</p>
-                <p>Dense layers: Fully connected layers that learn to map the summarized vector to a sentiment prediction.</p>
-                <p>Dropout layer: Helps prevent overfitting by randomly deactivating some neurons during training.</p>
-            <p>Word embedddings allows the model to have a strong understanding of words compared to Naive Bayes</p>
-            <p>However, it lacks a sequential context (word order), so like "not good" and "good not" would mean the same thing</p>
-            <p>Also doesn't model how a word can change on its surrounding context"</p>
-            
+
+            <h2>Model 4: DistilBERT (Hugging Face Endpoint + Redis)</h2>
+            <p>This is the production model. DistilBERT is fine-tuned for sentiment classification and deployed on Hugging Face Inference Endpoints. 
+               Redis is layered on top as a caching layer: users instantly see cached results (stale up to 1h old) while new predictions are fetched in the background. 
+               There&apos;s also a <code>/warm</code> route to pre-heat the endpoint to reduce cold-start latency.</p>
+            <p>Scores are normalized to the same [-1, 1] range as earlier models, so the front end doesn&apos;t need changes. Accuracy and general performance are way stronger than earlier setups, and it&apos;s scalable enough for a web demo.</p>
+            <p>To do: experiment with larger Reddit-specific fine-tuning datasets, optimize Hugging Face instance costs, maybe add smarter eviction rules for Redis cache.</p>
+
             <h2>Model 3: PyTorch LSTM</h2>
-            <p>Instaed of pooling, this model uses an LSTM, which is a type of RNN designed to capturing sequential information across the word sequence, which is good for sentiment analysis, where context is important</p>
-            <p>More computationally intensive but captures more complex dependencies. to be expanded later.</p>
-            <h2>Model 3 Optimization</h2>
-            <p>When I initially tested the model, I noticed that up to E3, train accuracy increased and validation loss decreased</p>
-            <p>After that, train accuracy improves, but validation loss increased, which indicates overfitting. So 3 epochs is the best</p>
-            <p>However, when I looked at the confusion matrix, the false positives was extremely high, indicating poor fitting in general. I looked at the model and noticed vocabulary was 4000, which is pretty low for vocabulary. Increasing it to 50000 vastly increased accuracy and pushed the overfitting issue back.</p>
-            <p>I tested vocab = 40000 and 30000, will later automate this but 30000 was better, with accuracy over 89% at decreasing validation loss on epoch 6</p>
+            <p>Instead of pooling, this model used an LSTM, a type of RNN designed to capture sequential context across word sequences. 
+               This was an improvement because word order matters a lot in sentiment (e.g., "not good" vs "good"). 
+               More computationally intensive but captured more complex dependencies.</p>
+            <h3>Optimization</h3>
+            <p>At first, training accuracy increased and validation loss decreased until ~epoch 3. After that, validation loss went up even as training accuracy climbed, which is textbook overfitting. 
+               Increasing vocabulary size (from 4k → 30k-50k) massively helped, pushing validation accuracy to ~89% at epoch 6 before overfitting. 
+               Still, inference latency made it hard to serve in real-time.</p>
             <img src="{{ url_for('static', filename='epochtest1.png') }}" alt="Validation Loss vs Epoch" width="500" height="400">
-            <p>It's hard to see, but based on the numbers:</p>
+            <p>Sample run:</p>
             <p>
-                Epoch 1/10, Train Accuracy: 0.6205, Validation Loss: 0.5736 <br>
-                Epoch 2/10, Train Accuracy: 0.7090, Validation Loss: 0.5674 <br>
-                Epoch 3/10, Train Accuracy: 0.7794, Validation Loss: 0.4797 <br>
-                Epoch 4/10, Train Accuracy: 0.8460, Validation Loss: 0.4006 <br>
-                Epoch 5/10, Train Accuracy: 0.8739, Validation Loss: 0.3753 <br>
-                Epoch 6/10, Train Accuracy: 0.8944, Validation Loss: 0.3733 <br>
-                Epoch 7/10, Train Accuracy: 0.9095, Validation Loss: 0.3747 <br>
-                Epoch 8/10, Train Accuracy: 0.9193, Validation Loss: 0.3974 <br>
-                Epoch 9/10, Train Accuracy: 0.9336, Validation Loss: 0.3659 <br>
-                Epoch 10/10, Train Accuracy: 0.9483, Validation Loss: 0.3954
+                Epoch 1/10, Train Acc: 0.6205, Val Loss: 0.5736 <br>
+                Epoch 2/10, Train Acc: 0.7090, Val Loss: 0.5674 <br>
+                Epoch 3/10, Train Acc: 0.7794, Val Loss: 0.4797 <br>
+                Epoch 4/10, Train Acc: 0.8460, Val Loss: 0.4006 <br>
+                Epoch 5/10, Train Acc: 0.8739, Val Loss: 0.3753 <br>
+                Epoch 6/10, Train Acc: 0.8944, Val Loss: 0.3733 <br>
+                Epoch 7/10, Train Acc: 0.9095, Val Loss: 0.3747 <br>
+                Epoch 8/10, Train Acc: 0.9193, Val Loss: 0.3974 <br>
+                Epoch 9/10, Train Acc: 0.9336, Val Loss: 0.3659 <br>
+                Epoch 10/10, Train Acc: 0.9483, Val Loss: 0.3954
             </p>
-            <p>I plan to further improve the model thro optimizer parameters, test/train split, etc - later. I'll probably also run it a few times and take an average of epoch values instead of only one time, but LSTMs are slow so - later.</p>
-            
+            <p>I planned more optimizer tuning and cross-validation runs, but honestly: LSTMs are slow, so I shelved it for production.</p>
 
+            <h2>Model 2: Keras Neural Network</h2>
+            <p>This model used an Embedding layer and a shallow Dense neural net. It was a step up from Naive Bayes since embeddings encode semantic meaning, but it ignored sequential context. 
+               For example, “not good” and “good not” collapsed into the same embedding vector, which is obviously wrong. 
+               Dropout helped with overfitting but overall performance plateaued quickly.</p>
 
+            <h2>Model 1: Naive Bayes (TextBlob)</h2>
+            <p>The very first prototype. TextBlob’s Naive Bayes sentiment classifier was used because it was light and easy to deploy. 
+               It just counted words (“stupid” = negative, “great” = positive), but assumed independence. So “pretty stupid” = pretty + stupid instead of context. 
+               Worked for a quick demo, but way too naive to be accurate.</p>
 
             <h2>Creator(s)</h2>
             <ul>
-                <li><a href="https://github.com/alissawu">Alissa Wu</a>, Duke University Computer Science and Mathematics</li>
+                <li><a href="https://github.com/alissawu">Alissa Wu</a>, New York University Computer Science and Mathematics</li>
                 <li><a href="https://github.com/EvanPFWang">Evan Wang</a>, New York University Mathematics and Computer Science</li>
             </ul>
         </div>
