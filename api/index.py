@@ -6,8 +6,7 @@ import pandas as pd
 import praw
 
 # ---------- Config ----------
-FRESH_TTL = int(os.getenv("FRESH_TTL_SECONDS", "90"))     # snapshot is "fresh" for 90s
-STALE_TTL = int(os.getenv("STALE_TTL_SECONDS", "3600"))   # keep & serve stale up to 1h
+CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", "604800"))  # 1 week - keep cached data available
 POST_LIMIT = int(os.getenv("POST_LIMIT", "20"))
 
 HF_ENDPOINT_URL = os.getenv("HF_ENDPOINT_URL")
@@ -80,11 +79,11 @@ def predict_sentiments(texts):
     return [to_sym(o["label"], float(o["score"])) for o in outs]
 
 # ---------- Cached data fetch ----------
-def get_data(subreddit: str, post_limit: int = POST_LIMIT):
+def get_data(subreddit: str, post_limit: int = POST_LIMIT, force_refresh: bool = False):
     """
     Returns (avg, med, data[{id,title,sentiment}]) using:
-      - page snapshot cache: sub:<sr>:v1  (fresh 90s, stale 1h)
-      - per-post score cache: sub:<sr>:scores (1h)
+      - page snapshot cache: sub:<sr>:v1  (always served if exists, unless force_refresh=True)
+      - per-post score cache: sub:<sr>:scores (1 week)
     """
     if reddit is None:
         raise RuntimeError("Reddit client not initialized (check CLIENT_ID/SECRET/USER_AGENT).")
@@ -93,8 +92,8 @@ def get_data(subreddit: str, post_limit: int = POST_LIMIT):
     snap = cache_get(page_key)
     now = time.time()
 
-    # Serve fresh snapshot immediately
-    if snap and (now - snap.get("ts", 0) <= FRESH_TTL):
+    # Always serve cached data immediately (no freshness check) unless forcing refresh
+    if snap and not force_refresh:
         rows = snap["headlines"]
         return float(snap["average"]), float(snap["median"]), rows
 
@@ -113,14 +112,14 @@ def get_data(subreddit: str, post_limit: int = POST_LIMIT):
         new_scores = predict_sentiments(new_titles)      # batched call to HF Endpoint
         for i, s in zip(missing_idx, new_scores):
             score_map[ids[i]] = s
-        cache_set(score_key, score_map, ttl=3600)
+        cache_set(score_key, score_map, ttl=CACHE_TTL)
 
     sentiments = [score_map[pid] for pid in ids if pid in score_map]
     if len(sentiments) != len(ids):
         # backfill if something went missing unexpectedly
         all_scores = predict_sentiments(titles)
         score_map = {pid: s for pid, s in zip(ids, all_scores)}
-        cache_set(score_key, score_map, ttl=3600)
+        cache_set(score_key, score_map, ttl=CACHE_TTL)
         sentiments = all_scores
 
     rows = [{"id": pid, "title": t, "sentiment": s} for pid, t, s in zip(ids, titles, sentiments)]
@@ -128,9 +127,9 @@ def get_data(subreddit: str, post_limit: int = POST_LIMIT):
     avg = float(df["sentiment"].mean()) if not df.empty else 0.0
     med = float(df["sentiment"].median()) if not df.empty else 0.0
 
-    # write new snapshot; keep up to STALE_TTL so stale can still be served next time
+    # write new snapshot with long TTL so it's always available
     snapshot = {"average": avg, "median": med, "headlines": rows, "ts": now}
-    cache_set(page_key, snapshot, ttl=STALE_TTL)
+    cache_set(page_key, snapshot, ttl=CACHE_TTL)
 
     return avg, med, rows
 
@@ -181,6 +180,24 @@ def warm():
     except Exception:
         pass
     return jsonify(ok=True)
+
+# Background refresh endpoint - call this via cron to pre-populate cache
+@app.route("/refresh/<subreddit>")
+def refresh_subreddit(subreddit):
+    """Force refresh cache for a subreddit (use with cron for popular subs)"""
+    try:
+        avg, med, headlines = get_data(subreddit, POST_LIMIT, force_refresh=True)
+        return jsonify(
+            success=True,
+            subreddit=subreddit,
+            average=avg,
+            median=med,
+            count=len(headlines),
+            ts=time.time()
+        )
+    except Exception as e:
+        print(f"refresh ERROR for {subreddit}:", e, "\n", traceback.format_exc())
+        return jsonify(success=False, error=str(e)), 500
 
 # Vercel handler
 app = app

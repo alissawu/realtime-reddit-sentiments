@@ -22,7 +22,7 @@ function renderAll(data) {
       el.textContent = `${h.title} - Sentiment: ${h.sentiment.toFixed(3)}`;
       container.appendChild(el);
     });
-  }
+  } 
 
   // freshness label - if wanted, <p id="freshness"></p> in HTML 
   const freshness = document.getElementById('freshness');
